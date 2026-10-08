@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Taakht.Platform</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Confluent.Kafka" />
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Core.Api" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Taakht.Platform.Tests" />
+    <Protobuf Include="../../../api/proto/taakht/common/v1/envelope.proto" ProtoRoot="../../../api/proto" GrpcServices="None" Link="Protos/envelope.proto" />
+  </ItemGroup>
+
+</Project>

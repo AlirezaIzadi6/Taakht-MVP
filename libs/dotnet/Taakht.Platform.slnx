@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Taakht.Platform/Taakht.Platform.csproj" />
+  <Project Path="Taakht.Platform.Tests/Taakht.Platform.Tests.csproj" />
+</Solution>
