@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package taakht.swap.v1;
+
+option go_package = "github.com/taakht/taakht/gen/taakht/swap/v1;swapv1";
+option csharp_namespace = "Taakht.Swap.V1";
+
+// Topic: swap.events. Key: swap id.
+message ExclusiveLockAcquired {
+  string swap_id = 1;
+  string negotiation_id = 2;
+  string ad_a_id = 3;
+  string ad_b_id = 4;
+}
+message SwapRejected {
+  string swap_id = 1;
+  string negotiation_id = 2;
+  string reason = 3;
+}
+message SwapCompleted {
+  string swap_id = 1;
+  string ad_a_id = 2;
+  string ad_b_id = 3;
+}
+message SwapCancelled {
+  string swap_id = 1;
+  string ad_a_id = 2;
+  string ad_b_id = 3;
+  string reason = 4;
+  // Set when a party failed to pay in time (feeds Reputation later).
+  string defaulting_user_id = 5;
+}

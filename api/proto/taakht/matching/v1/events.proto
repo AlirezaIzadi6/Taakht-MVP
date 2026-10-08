@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package taakht.matching.v1;
+
+option go_package = "github.com/taakht/taakht/gen/taakht/matching/v1;matchingv1";
+option csharp_namespace = "Taakht.Matching.V1";
+
+// Topic: matching.events. Key: ad id. Stands in for the user notification in the MVP.
+message MatchFound {
+  string ad_id = 1;
+  string matched_ad_id = 2;
+  double score = 3;
+}

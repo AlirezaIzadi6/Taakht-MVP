@@ -48,3 +48,25 @@ lint: ## Check everything without fixing (same as CI)
 test: ## Run all tests
 	@for s in $(DOTNET_SOLUTIONS); do dotnet test "$$s" || exit 1; done
 	@for m in $(GO_MODULES); do (cd $$m && go test -race ./...) || exit 1; done
+
+# ---------- MVP: contracts and local infrastructure ----------
+# PROTO_INCLUDE: directory holding google/protobuf/*.proto (shipped next to protoc on most installs).
+PROTO_INCLUDE ?= $(shell dirname "$$(command -v protoc)")/../include
+
+.PHONY: proto up down logs
+
+proto: ## Regenerate Go code from api/proto (.NET generates at build time via Grpc.Tools)
+	@rm -rf gen/go/taakht
+	protoc -I api/proto -I "$(PROTO_INCLUDE)" \
+		--go_out=gen/go --go_opt=paths=source_relative \
+		--go-grpc_out=gen/go --go-grpc_opt=paths=source_relative \
+		$$(find api/proto -name '*.proto')
+
+up: ## Start local infrastructure (Postgres, Kafka)
+	docker compose -f deploy/docker-compose.yml up -d --wait
+
+down: ## Stop local infrastructure and delete its data
+	docker compose -f deploy/docker-compose.yml down -v
+
+logs: ## Follow infrastructure logs
+	docker compose -f deploy/docker-compose.yml logs -f

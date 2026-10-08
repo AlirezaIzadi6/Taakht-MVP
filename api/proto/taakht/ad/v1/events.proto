@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package taakht.ad.v1;
+
+import "taakht/ad/v1/ad.proto";
+
+option go_package = "github.com/taakht/taakht/gen/taakht/ad/v1;adv1";
+option csharp_namespace = "Taakht.Ad.V1";
+
+// Topic: ad.events. Key: ad id.
+// Published/Edited/Released carry the full snapshot so consumers never call back.
+message AdPublished {
+  Ad ad = 1;
+}
+message AdEdited {
+  Ad ad = 1;
+}
+message AdHidden {
+  string ad_id = 1;
+}
+message AdLocked {
+  string ad_id = 1;
+  string swap_id = 2;
+}
+message AdReleased {
+  string ad_id = 1;
+  string swap_id = 2;
+  // The ad after release (status is published or hidden).
+  Ad ad = 3;
+}
+message AdClosed {
+  string ad_id = 1;
+  string swap_id = 2;
+}

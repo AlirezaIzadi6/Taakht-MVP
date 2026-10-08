@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package taakht.ad.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/taakht/taakht/gen/taakht/ad/v1;adv1";
+option csharp_namespace = "Taakht.Ad.V1";
+
+enum AdStatus {
+  AD_STATUS_UNSPECIFIED = 0;
+  AD_STATUS_PUBLISHED = 1;
+  AD_STATUS_HIDDEN = 2;
+  // Held by an agreed swap; out of the index. Returns to its previous state if the swap is cancelled.
+  AD_STATUS_LOCKED = 3;
+  // Final. No cause can cancel the agreement any more.
+  AD_STATUS_CLOSED = 4;
+}
+
+// What the owner has and what they want. Either side may be partial.
+message AdSpec {
+  string title = 1;
+  string description = 2;
+  string have_category = 3;
+  // Empty means "open to anything" on the want side.
+  repeated string want_categories = 4;
+  repeated string neighborhood_ids = 5;
+  // Rough value of the item the owner has, in toman. 0 = unknown.
+  int64 value_estimate = 6;
+}
+
+message Ad {
+  string id = 1;
+  string owner_id = 2;
+  AdStatus status = 3;
+  // Incremented on every edit. Approvals are bound to (ad id, version).
+  int32 version = 4;
+  AdSpec spec = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+service AdService {
+  // New ads start Hidden.
+  rpc CreateAd(CreateAdRequest) returns (Ad);
+  // Creates a new version. Fails with ABORTED if expected_version is stale.
+  rpc EditAd(EditAdRequest) returns (Ad);
+  // Needs at least one filter (want category or neighborhood).
+  rpc PublishAd(AdIdRequest) returns (Ad);
+  rpc HideAd(AdIdRequest) returns (Ad);
+  rpc GetAd(GetAdRequest) returns (Ad);
+  rpc ListMyAds(google.protobuf.Empty) returns (ListMyAdsResponse);
+  // Atomically claims both ads for a swap. Idempotent by swap_id.
+  // FAILED_PRECONDITION if an ad is not lockable or its version differs from the agreed one.
+  rpc LockAds(LockAdsRequest) returns (google.protobuf.Empty);
+}
+
+message CreateAdRequest {
+  AdSpec spec = 1;
+}
+message EditAdRequest {
+  string ad_id = 1;
+  int32 expected_version = 2;
+  AdSpec spec = 3;
+}
+message AdIdRequest {
+  string ad_id = 1;
+}
+message GetAdRequest {
+  string ad_id = 1;
+  // 0 = current version.
+  int32 version = 2;
+}
+message ListMyAdsResponse {
+  repeated Ad ads = 1;
+}
+
+message AdRef {
+  string ad_id = 1;
+  int32 version = 2;
+}
+message LockAdsRequest {
+  string swap_id = 1;
+  repeated AdRef ads = 2;
+}

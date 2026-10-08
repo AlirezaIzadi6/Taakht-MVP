@@ -61,3 +61,7 @@ lefthook-local.yml
 *.log
 logs/
 tmp/
+
+# MVP local run artifacts
+.env
+*.log

@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package taakht.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/taakht/taakht/gen/taakht/common/v1;commonv1";
+option csharp_namespace = "Taakht.Common.V1";
+
+// Every Kafka message value is an Envelope. The Kafka key is the aggregate id.
+// `type` is the fully qualified proto message name of the payload
+// (for example "taakht.ad.v1.AdPublished"); `payload` is that message, serialized.
+message Envelope {
+  string event_id = 1;
+  string type = 2;
+  string aggregate_id = 3;
+  google.protobuf.Timestamp occurred_at = 4;
+  bytes payload = 5;
+}

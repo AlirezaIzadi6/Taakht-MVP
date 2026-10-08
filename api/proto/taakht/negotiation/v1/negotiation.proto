@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package taakht.negotiation.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/taakht/taakht/gen/taakht/negotiation/v1;negotiationv1";
+option csharp_namespace = "Taakht.Negotiation.V1";
+
+enum DeliveryMethod {
+  DELIVERY_METHOD_UNSPECIFIED = 0;
+  DELIVERY_METHOD_IN_PERSON = 1; // default; the parties arrange it themselves
+  DELIVERY_METHOD_LOCKER = 2;    // the leg owner pays the locker fee
+}
+
+// Terms of the deal except the items (the items live on the ads).
+message Terms {
+  // Leg A = the requester's item, leg B = the target ad owner's item.
+  DeliveryMethod leg_a = 1;
+  DeliveryMethod leg_b = 2;
+  // Agreed price difference in toman, settled by the parties outside the system. 0 = none.
+  int64 price_difference = 3;
+  // Who pays the difference. Empty when price_difference is 0.
+  string payer_user_id = 4;
+}
+
+message Proposal {
+  string id = 1;
+  int32 number = 2;
+  Terms terms = 3;
+  // System-created proposals have an empty author.
+  string author_user_id = 4;
+}
+
+enum NegotiationStatus {
+  NEGOTIATION_STATUS_UNSPECIFIED = 0;
+  NEGOTIATION_STATUS_OPEN = 1;
+  // All four approvals are valid; the swap service is locking the ads.
+  NEGOTIATION_STATUS_AGREEMENT_PENDING = 2;
+  NEGOTIATION_STATUS_AGREED = 3;
+  NEGOTIATION_STATUS_DECLINED = 4;
+  NEGOTIATION_STATUS_WITHDRAWN = 5;
+  // System cancellation: the ad was locked by another swap, or the lock was rejected.
+  NEGOTIATION_STATUS_CANCELLED = 6;
+}
+
+enum ApprovalKind {
+  APPROVAL_KIND_UNSPECIFIED = 0;
+  APPROVAL_KIND_AD = 1;    // target = version of the other side's ad
+  APPROVAL_KIND_TERMS = 2; // target = proposal number
+}
+
+message Approval {
+  string user_id = 1;
+  ApprovalKind kind = 2;
+  // Ad version or proposal number that was approved.
+  int32 target = 3;
+  // False when the target has changed since (the approval is stale).
+  bool valid = 4;
+}
+
+message Negotiation {
+  string id = 1;
+  string requester_user_id = 2;
+  string requester_ad_id = 3;
+  string target_user_id = 4;
+  string target_ad_id = 5;
+  NegotiationStatus status = 6;
+  Proposal active_proposal = 7;
+  repeated Approval approvals = 8;
+  string cancel_reason = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+service NegotiationService {
+  // Opens a negotiation with proposal 1 and approves the target ad for the requester.
+  rpc OpenNegotiation(OpenNegotiationRequest) returns (Negotiation);
+  // Approve the other side's ad at a specific version (the target owner's "accept negotiation" is this call).
+  rpc ApproveAd(ApproveAdRequest) returns (Negotiation);
+  // Creates a new active proposal; the author's TERMS approval is implicit.
+  rpc ReviseProposal(ReviseProposalRequest) returns (Negotiation);
+  rpc ApproveProposal(ProposalRefRequest) returns (Negotiation);
+  // Rejects the active proposal and restores the previous one.
+  rpc RejectProposal(ProposalRefRequest) returns (Negotiation);
+  rpc CloseNegotiation(CloseNegotiationRequest) returns (Negotiation);
+  rpc GetNegotiation(NegotiationIdRequest) returns (Negotiation);
+  // Negotiations where the caller is a party; with ad_id, only those on that ad.
+  rpc ListNegotiations(ListNegotiationsRequest) returns (ListNegotiationsResponse);
+}
+
+message OpenNegotiationRequest {
+  string requester_ad_id = 1;
+  string target_ad_id = 2;
+}
+message ApproveAdRequest {
+  string negotiation_id = 1;
+  // Version of the other side's ad the caller has seen. ABORTED if it is no longer current.
+  int32 ad_version = 2;
+}
+message ReviseProposalRequest {
+  string negotiation_id = 1;
+  int32 seen_proposal_number = 2;
+  Terms terms = 3;
+}
+message ProposalRefRequest {
+  string negotiation_id = 1;
+  // Number of the proposal the caller has seen; ABORTED if it is no longer active.
+  int32 proposal_number = 2;
+}
+message CloseNegotiationRequest {
+  string negotiation_id = 1;
+}
+message NegotiationIdRequest {
+  string negotiation_id = 1;
+}
+message ListNegotiationsRequest {
+  string ad_id = 1;
+}
+message ListNegotiationsResponse {
+  repeated Negotiation negotiations = 1;
+}

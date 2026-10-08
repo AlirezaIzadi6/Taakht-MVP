@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package taakht.matching.v1;
+
+import "taakht/ad/v1/ad.proto";
+
+option go_package = "github.com/taakht/taakht/gen/taakht/matching/v1;matchingv1";
+option csharp_namespace = "Taakht.Matching.V1";
+
+service MatchingService {
+  // Browse: a Criteria that is never stored.
+  rpc Search(SearchRequest) returns (SearchResponse);
+  // Two-sided candidates for one of the caller's ads.
+  rpc FindMatches(FindMatchesRequest) returns (SearchResponse);
+}
+
+message Criteria {
+  // Categories the searcher wants to receive (matched against the other ad's have_category).
+  repeated string want_categories = 1;
+  repeated string neighborhood_ids = 2;
+}
+message SearchRequest {
+  Criteria criteria = 1;
+  int32 limit = 2;
+}
+message FindMatchesRequest {
+  string ad_id = 1;
+  int32 limit = 2;
+}
+message Candidate {
+  taakht.ad.v1.Ad ad = 1;
+  double score = 2;
+}
+message SearchResponse {
+  repeated Candidate candidates = 1;
+}

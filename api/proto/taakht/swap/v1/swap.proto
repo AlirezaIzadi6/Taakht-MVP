@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package taakht.swap.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "taakht/negotiation/v1/negotiation.proto";
+
+option go_package = "github.com/taakht/taakht/gen/taakht/swap/v1;swapv1";
+option csharp_namespace = "Taakht.Swap.V1";
+
+enum SwapStatus {
+  SWAP_STATUS_UNSPECIFIED = 0;
+  // Created from an agreement; the exclusive lock on the ads is being taken.
+  SWAP_STATUS_LOCKING = 1;
+  // Lock rejected (an ad is gone or changed). Final.
+  SWAP_STATUS_REJECTED = 2;
+  // Ads locked; waiting for locker fees.
+  SWAP_STATUS_AWAITING_PAYMENT = 3;
+  SWAP_STATUS_COMPLETED = 4;
+  SWAP_STATUS_CANCELLED = 5;
+}
+
+message Leg {
+  string owner_user_id = 1;
+  taakht.negotiation.v1.DeliveryMethod method = 2;
+  // Only meaningful for locker legs.
+  bool fee_paid = 3;
+}
+
+message Swap {
+  string id = 1;
+  string negotiation_id = 2;
+  string ad_a_id = 3;
+  string ad_b_id = 4;
+  SwapStatus status = 5;
+  Leg leg_a = 6;
+  Leg leg_b = 7;
+  google.protobuf.Timestamp payment_deadline = 8;
+  string cancel_reason = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+service SwapService {
+  rpc GetSwap(SwapIdRequest) returns (Swap);
+  rpc ListMySwaps(google.protobuf.Empty) returns (ListMySwapsResponse);
+  // MOCK of the locker partner webhook (LockerFeePaid). Dev only.
+  rpc SimulateLockerFeePaid(SimulateLockerFeePaidRequest) returns (Swap);
+}
+
+message SwapIdRequest {
+  string swap_id = 1;
+}
+message ListMySwapsResponse {
+  repeated Swap swaps = 1;
+}
+message SimulateLockerFeePaidRequest {
+  string swap_id = 1;
+  string user_id = 2;
+}

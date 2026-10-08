@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package taakht.negotiation.v1;
+
+import "taakht/negotiation/v1/negotiation.proto";
+
+option go_package = "github.com/taakht/taakht/gen/taakht/negotiation/v1;negotiationv1";
+option csharp_namespace = "Taakht.Negotiation.V1";
+
+// Topic: negotiation.events. Key: negotiation id.
+message NegotiationOpened {
+  string negotiation_id = 1;
+  string requester_ad_id = 2;
+  string target_ad_id = 3;
+}
+message NegotiationClosed {
+  string negotiation_id = 1;
+  NegotiationStatus status = 2;
+  string reason = 3;
+}
+
+message AgreedAd {
+  string ad_id = 1;
+  string owner_id = 2;
+  // The version both sides approved.
+  int32 version = 3;
+}
+// All four approvals were valid at the same moment.
+message AgreementReached {
+  string negotiation_id = 1;
+  AgreedAd ad_a = 2; // requester's ad
+  AgreedAd ad_b = 3; // target ad
+  Terms terms = 4;
+}

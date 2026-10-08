@@ -1,0 +1,12 @@
+{
+  "categories": ["books", "tools", "furniture", "sports", "electronics-small", "kitchen"],
+  "neighborhoods": [
+    { "id": "n-valiasr", "name": "Valiasr", "city": "tehran", "lat": 35.7219, "lon": 51.4093 },
+    { "id": "n-tajrish", "name": "Tajrish", "city": "tehran", "lat": 35.8044, "lon": 51.4339 },
+    { "id": "n-sadeghieh", "name": "Sadeghieh", "city": "tehran", "lat": 35.7157, "lon": 51.3199 },
+    { "id": "n-narmak", "name": "Narmak", "city": "tehran", "lat": 35.7370, "lon": 51.5100 },
+    { "id": "n-shahrak-gharb", "name": "Shahrak-e Gharb", "city": "tehran", "lat": 35.7646, "lon": 51.3680 },
+    { "id": "n-karaj-gohardasht", "name": "Gohardasht", "city": "karaj", "lat": 35.8204, "lon": 50.9393 }
+  ],
+  "seedUsers": ["user-1", "user-2", "user-3", "user-4"]
+}
