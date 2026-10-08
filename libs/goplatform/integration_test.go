@@ -121,6 +121,62 @@ func TestOutboxKafkaConsume(t *testing.T) {
 	}
 }
 
+// TestPermanentFailureDoesNotBlockPartition: a poison event is skipped (and recorded) so the next one is handled.
+func TestPermanentFailureDoesNotBlockPartition(t *testing.T) {
+	base := os.Getenv("TEST_DATABASE_URL")
+	brokers := os.Getenv("KAFKA_BROKERS")
+	if base == "" || brokers == "" {
+		t.Skip("TEST_DATABASE_URL and KAFKA_BROKERS not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pool := NewThrowawayDB(ctx, t, base)
+	if err := db.Migrate(ctx, pool, fstest.MapFS{"m/001_init.sql": {Data: []byte(ddl)}}, "m"); err != nil {
+		t.Fatal(err)
+	}
+	topic := "test.events." + uuid.NewString()
+	key := uuid.NewString()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := outbox.Add(ctx, tx, topic, key, &adv1.AdPublished{Ad: &adv1.Ad{Id: key}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := outbox.Add(ctx, tx, topic, key, &adv1.AdHidden{AdId: key}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	bs := strings.Split(brokers, ",")
+	go func() { _ = outbox.RunRelay(ctx, pool, bs) }()
+	handlers := map[string]consume.Handler{
+		"taakht.ad.v1.AdPublished": func(context.Context, pgx.Tx, *commonv1.Envelope) error {
+			return consume.Permanent(fmt.Errorf("poison"))
+		},
+		"taakht.ad.v1.AdHidden": func(ctx context.Context, tx pgx.Tx, env *commonv1.Envelope) error {
+			_, err := tx.Exec(ctx, `INSERT INTO seen VALUES ($1, $2)`, env.EventId, key)
+			return err
+		},
+	}
+	group := "itest-" + uuid.NewString()
+	go func() { _ = consume.Run(ctx, pool, bs, group, []string{topic}, handlers) }()
+	deadline := time.Now().Add(45 * time.Second)
+	for {
+		var seen, processed int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM seen WHERE ad_id = $1`, key).Scan(&seen)
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM processed_events WHERE consumer = $1`, group).Scan(&processed)
+		if seen == 1 && processed == 2 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("seen=%d processed=%d, want 1 and 2", seen, processed)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 // NewThrowawayDB creates an empty database next to base and drops it at test end.
 func NewThrowawayDB(ctx context.Context, t *testing.T, base string) *pgxpool.Pool {
 	t.Helper()
@@ -144,12 +200,13 @@ func NewThrowawayDB(ctx context.Context, t *testing.T, base string) *pgxpool.Poo
 	}
 	t.Cleanup(func() {
 		pool.Close()
-		c, err := pgx.Connect(context.Background(), base)
+		ctx := context.WithoutCancel(ctx)
+		c, err := pgx.Connect(ctx, base)
 		if err != nil {
 			return
 		}
-		defer c.Close(context.Background())
-		_, _ = c.Exec(context.Background(), fmt.Sprintf(`DROP DATABASE IF EXISTS %s WITH (FORCE)`, name))
+		defer c.Close(ctx)
+		_, _ = c.Exec(ctx, fmt.Sprintf(`DROP DATABASE IF EXISTS %s WITH (FORCE)`, name))
 	})
 	return pool
 }

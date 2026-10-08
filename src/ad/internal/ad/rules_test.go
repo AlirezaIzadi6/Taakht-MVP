@@ -1,6 +1,7 @@
 package ad
 
 import (
+	"strings"
 	"testing"
 
 	adv1 "github.com/taakht/taakht/gen/taakht/ad/v1"
@@ -22,6 +23,11 @@ func TestValidateSpec(t *testing.T) {
 		{"bad have", &adv1.AdSpec{Title: "x", HaveCategory: "cars"}, true},
 		{"bad want", &adv1.AdSpec{Title: "x", WantCategories: []string{"cars"}}, true},
 		{"bad hood", &adv1.AdSpec{Title: "x", NeighborhoodIds: []string{"n-x"}}, true},
+		{"blank title", &adv1.AdSpec{Title: "   "}, true},
+		{"long title", &adv1.AdSpec{Title: strings.Repeat("x", 121)}, true},
+		{"long description", &adv1.AdSpec{Title: "x", Description: strings.Repeat("d", 4001)}, true},
+		{"too many wants", &adv1.AdSpec{Title: "x", WantCategories: make([]string, 21)}, true},
+		{"long entry", &adv1.AdSpec{Title: "x", NeighborhoodIds: []string{strings.Repeat("n", 65)}}, true},
 		{"negative value", &adv1.AdSpec{Title: "x", ValueEstimate: -1}, true},
 	}
 	for _, c := range cases {
@@ -54,5 +60,19 @@ func TestStateRules(t *testing.T) {
 		if CanHide(s) != (s == StatusPublished) {
 			t.Errorf("%s: CanHide", s)
 		}
+	}
+}
+
+func TestValidateSpecNormalizes(t *testing.T) {
+	spec := &adv1.AdSpec{Title: "  hello  ", WantCategories: []string{"books", "tools", "books"}, NeighborhoodIds: []string{"n-valiasr", "n-valiasr"}}
+	if err := ValidateSpec(spec, testElig); err != nil {
+		t.Fatal(err)
+	}
+	if spec.Title != "hello" || len(spec.WantCategories) != 2 || len(spec.NeighborhoodIds) != 1 {
+		t.Fatalf("not normalized: %v", spec)
+	}
+	// 20 distinct-looking duplicates still count against the cap before de-duplication.
+	if err := ValidateSpec(&adv1.AdSpec{Title: "x", WantCategories: make([]string, 20)}, testElig); err == nil {
+		t.Fatal("empty category names are unknown and must fail")
 	}
 }

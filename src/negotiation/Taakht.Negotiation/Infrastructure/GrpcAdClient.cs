@@ -1,12 +1,17 @@
 using Grpc.Core;
 using Taakht.Ad.V1;
 using Taakht.Negotiation.Application;
+using Taakht.Platform;
 using DomainAdStatus = Taakht.Negotiation.Domain.AdStatus;
 using DomainSnapshot = Taakht.Negotiation.Domain.AdSnapshot;
 
 namespace Taakht.Negotiation.Infrastructure;
 
-/// <summary>Calls ad.GetAd; the caller's x-user-id is forwarded by the platform client interceptor.</summary>
+/// <summary>
+/// Calls ad.GetAd as the system identity (system:negotiation): the Ad service shows unpublished ads and old versions
+/// only to owners and system callers, and negotiation authorizes the real caller itself. The explicit header wins over
+/// the ambient user the platform client interceptor would otherwise forward.
+/// </summary>
 public sealed class GrpcAdClient(AdService.AdServiceClient client) : IAdClient
 {
     public async Task<DomainSnapshot?> GetAdAsync(string adId, CancellationToken ct)
@@ -15,6 +20,7 @@ public sealed class GrpcAdClient(AdService.AdServiceClient client) : IAdClient
         {
             var ad = await client.GetAdAsync(
                 new GetAdRequest { AdId = adId },
+                headers: new Metadata { { IdentityConstants.UserIdHeader, SystemIdentities.Negotiation } },
                 deadline: DateTime.UtcNow.AddSeconds(5),
                 cancellationToken: ct);
             return new DomainSnapshot(ad.Id, ad.OwnerId, ad.Version, Map(ad.Status));

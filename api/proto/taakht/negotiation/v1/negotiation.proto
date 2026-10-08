@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package taakht.negotiation.v1;
 
+import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/taakht/taakht/gen/taakht/negotiation/v1;negotiationv1";
@@ -75,18 +76,55 @@ message Negotiation {
 
 service NegotiationService {
   // Opens a negotiation with proposal 1 and approves the target ad for the requester.
-  rpc OpenNegotiation(OpenNegotiationRequest) returns (Negotiation);
+  rpc OpenNegotiation(OpenNegotiationRequest) returns (Negotiation) {
+    option (google.api.http) = {
+      post: "/v1/negotiations"
+      body: "*"
+    };
+  }
   // Approve the other side's ad at a specific version (the target owner's "accept negotiation" is this call).
-  rpc ApproveAd(ApproveAdRequest) returns (Negotiation);
+  rpc ApproveAd(ApproveAdRequest) returns (Negotiation) {
+    option (google.api.http) = {
+      post: "/v1/negotiations/{negotiation_id}:approve-ad"
+      body: "*"
+    };
+  }
   // Creates a new active proposal; the author's TERMS approval is implicit.
-  rpc ReviseProposal(ReviseProposalRequest) returns (Negotiation);
-  rpc ApproveProposal(ProposalRefRequest) returns (Negotiation);
+  rpc ReviseProposal(ReviseProposalRequest) returns (Negotiation) {
+    option (google.api.http) = {
+      post: "/v1/negotiations/{negotiation_id}:revise"
+      body: "*"
+    };
+  }
+  rpc ApproveProposal(ProposalRefRequest) returns (Negotiation) {
+    option (google.api.http) = {
+      post: "/v1/negotiations/{negotiation_id}:approve-proposal"
+      body: "*"
+    };
+  }
   // Rejects the active proposal and restores the previous one.
-  rpc RejectProposal(ProposalRefRequest) returns (Negotiation);
-  rpc CloseNegotiation(CloseNegotiationRequest) returns (Negotiation);
-  rpc GetNegotiation(NegotiationIdRequest) returns (Negotiation);
+  rpc RejectProposal(ProposalRefRequest) returns (Negotiation) {
+    option (google.api.http) = {
+      post: "/v1/negotiations/{negotiation_id}:reject-proposal"
+      body: "*"
+    };
+  }
+  rpc CloseNegotiation(CloseNegotiationRequest) returns (Negotiation) {
+    option (google.api.http) = {
+      post: "/v1/negotiations/{negotiation_id}:close"
+    };
+  }
+  rpc GetNegotiation(NegotiationIdRequest) returns (Negotiation) {
+    option (google.api.http) = {
+      get: "/v1/negotiations/{negotiation_id}"
+    };
+  }
   // Negotiations where the caller is a party; with ad_id, only those on that ad.
-  rpc ListNegotiations(ListNegotiationsRequest) returns (ListNegotiationsResponse);
+  rpc ListNegotiations(ListNegotiationsRequest) returns (ListNegotiationsResponse) {
+    option (google.api.http) = {
+      get: "/v1/negotiations"
+    };
+  }
 }
 
 message OpenNegotiationRequest {

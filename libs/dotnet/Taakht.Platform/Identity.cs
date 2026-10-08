@@ -6,6 +6,19 @@ namespace Taakht.Platform;
 public static class IdentityConstants
 {
     public const string UserIdHeader = "x-user-id";
+
+    /// <summary>Longest accepted caller id.</summary>
+    public const int MaxUserIdLength = 64;
+}
+
+/// <summary>Service identities used for service-to-service calls (never real users).</summary>
+public static class SystemIdentities
+{
+    public const string Prefix = "system:";
+    public const string Swap = "system:swap";
+    public const string Negotiation = "system:negotiation";
+
+    public static bool IsSystem(string? userId) => userId is not null && userId.StartsWith(Prefix, StringComparison.Ordinal);
 }
 
 /// <summary>Ambient user id for the current async flow (set by the server interceptor or by background jobs).</summary>
@@ -37,10 +50,17 @@ public static class CurrentUser
     {
         ArgumentNullException.ThrowIfNull(context);
         var id = context.RequestHeaders.GetValue(IdentityConstants.UserIdHeader);
-        return string.IsNullOrWhiteSpace(id)
-            ? throw new RpcException(new Status(StatusCode.Unauthenticated, "missing x-user-id"))
-            : id;
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            throw new RpcException(new Status(StatusCode.Unauthenticated, "missing x-user-id"));
+        }
+
+        return IsValid(id) ? id : throw new RpcException(new Status(StatusCode.Unauthenticated, "invalid x-user-id"));
     }
+
+    /// <summary>A usable caller id has at most 64 characters and no control characters.</summary>
+    public static bool IsValid(string id) =>
+        id.Length is > 0 and <= IdentityConstants.MaxUserIdLength && !id.Any(char.IsControl);
 }
 
 /// <summary>Requires x-user-id on every call and exposes it via <see cref="UserContext"/> for the call's duration.</summary>

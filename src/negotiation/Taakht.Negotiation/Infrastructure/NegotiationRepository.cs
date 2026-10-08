@@ -125,12 +125,12 @@ public static class NegotiationRepository
     {
         await conn.ExecuteAsync(new CommandDefinition(
             """
-            INSERT INTO ad_ref (ad_id, owner_id, current_version, status) VALUES (@AdId, @OwnerId, @Version, @Status)
+            INSERT INTO ad_ref (ad_id, owner_id, current_version) VALUES (@AdId, @OwnerId, @Version)
             ON CONFLICT (ad_id) DO UPDATE
-              SET owner_id = excluded.owner_id, current_version = excluded.current_version, status = excluded.status
-              WHERE ad_ref.current_version <= excluded.current_version
+              SET owner_id = excluded.owner_id, current_version = excluded.current_version
+              WHERE ad_ref.current_version < excluded.current_version
             """,
-            new { ad.AdId, ad.OwnerId, ad.Version, Status = ad.Status.ToString().ToUpperInvariant() },
+            new { ad.AdId, ad.OwnerId, ad.Version },
             tx, cancellationToken: ct));
     }
 
@@ -173,6 +173,20 @@ public static class NegotiationRepository
             new { adIds = adIds.ToArray() }, tx, cancellationToken: ct));
         return rows.ToDictionary(r => r.AdId, r => r.Version, StringComparer.Ordinal);
     }
+
+    /// <summary>
+    /// Ids of AGREED negotiations between exactly this pair of ads (either orientation), oldest first, locked in that order.
+    /// </summary>
+    public static async Task<List<Guid>> LockAgreedForPairAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, string adAId, string adBId, CancellationToken ct) =>
+        (await conn.QueryAsync<Guid>(new CommandDefinition(
+            """
+            SELECT id FROM negotiation
+            WHERE status = 'AGREED'
+              AND ((requester_ad_id = @adAId AND target_ad_id = @adBId) OR (requester_ad_id = @adBId AND target_ad_id = @adAId))
+            ORDER BY updated_at, id FOR UPDATE
+            """,
+            new { adAId, adBId }, tx, cancellationToken: ct))).ToList();
 
     /// <summary>Ids of live negotiations that involve any of the given ads, locked in id order.</summary>
     public static async Task<List<Guid>> LockLiveInvolvingAsync(

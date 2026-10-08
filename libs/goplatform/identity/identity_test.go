@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -36,5 +37,19 @@ func TestClientInterceptorForwards(t *testing.T) {
 	}
 	if err := ClientInterceptor()(ctx, "/x", nil, nil, nil, inv); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestServerInterceptorRejectsBadIDs(t *testing.T) {
+	h := func(ctx context.Context, _ any) (any, error) { return UserID(ctx), nil }
+	for _, id := range []string{strings.Repeat("a", 65), "user\n1", "user\x00"} {
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(Header, id))
+		_, err := ServerInterceptor()(ctx, nil, &grpc.UnaryServerInfo{}, h)
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("id %q: want Unauthenticated, got %v", id, err)
+		}
+	}
+	if !IsSystem(SystemSwap) || IsSystem("user-1") {
+		t.Fatal("IsSystem misclassifies")
 	}
 }

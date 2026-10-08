@@ -48,6 +48,10 @@ With `TEST_DATABASE_URL` set, the tests create a throwaway database on that serv
 ## Behaviour worth knowing
 
 - Approvals are never deleted; their `valid` flag is computed on read (AD: target equals the ad's current version in `ad_ref`; TERMS: target equals the active proposal number). `ad_ref` is fed by `AdPublished`/`AdEdited`/`AdReleased` and refreshed from every synchronous `ad.GetAd`.
+- `ad_ref` keeps only `owner_id` and `current_version` (migration 002 dropped the never-current `status`); an event only overwrites a strictly newer version.
+- All synchronous `ad.GetAd` calls run as the system identity `system:negotiation` (the Ad service hides unpublished ads and old versions from non-owners). Negotiation authorizes the real caller itself: the requester must own the requester ad, the target ad must be published, only parties may read or change a negotiation.
+- `SwapCancelled` (swap.events, e.g. payment timeout) cancels the AGREED negotiation between exactly that ad pair (matched through its ad ids; the event has no negotiation id; ignored when none) and emits `NegotiationClosed` with the event reason. Competing negotiations cancelled earlier by `ExclusiveLockAcquired` stay cancelled. `SwapCompleted` changes nothing.
+- Price difference must be between 0 and 1 000 000 000 000.
 - Reject restores the previous proposal and keeps no further history (a second reject in a row is `FAILED_PRECONDITION`). New proposals always get a fresh number.
 - When the fourth approval lands, the service calls `ad.GetAd` for both ads; if either version differs from the approved one (or the ad is not published/hidden) the call is `ABORTED` and the negotiation stays `OPEN`.
 - The mock locker eligibility rejects `user-4`.

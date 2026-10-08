@@ -27,6 +27,7 @@ public sealed class EventHandlers(TimeProvider clock, ILogger<EventHandlers> log
             [ExclusiveLockAcquired.Descriptor.FullName] = (c, t, e) =>
                 OnExclusiveLockAsync(c, t, ExclusiveLockAcquired.Parser.ParseFrom(e.Payload)),
             [SwapRejected.Descriptor.FullName] = (c, t, e) => OnSwapRejectedAsync(c, t, SwapRejected.Parser.ParseFrom(e.Payload)),
+            [SwapCancelled.Descriptor.FullName] = (c, t, e) => OnSwapCancelledAsync(c, t, SwapCancelled.Parser.ParseFrom(e.Payload)),
         };
 
     internal static Task UpsertAdAsync(NpgsqlConnection conn, NpgsqlTransaction tx, Taakht.Ad.V1.Ad? ad) =>
@@ -90,6 +91,35 @@ public sealed class EventHandlers(TimeProvider clock, ILogger<EventHandlers> log
         }
 
         n.Cancel(e.Reason, clock.GetUtcNow());
+        await NegotiationRepository.SaveAsync(conn, tx, n, CancellationToken.None);
+        await NegotiationService.AddClosedEventAsync(conn, tx, n, NegotiationStatus.Cancelled, e.Reason, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// The swap behind an agreed negotiation was cancelled. SwapCancelled carries no negotiation id, so the
+    /// negotiation is found by its ad pair: the AGREED one involving exactly those two ads (the oldest if a
+    /// stale duplicate exists). Competitors cancelled when the lock was taken stay cancelled.
+    /// </summary>
+    internal async Task OnSwapCancelledAsync(NpgsqlConnection conn, NpgsqlTransaction tx, SwapCancelled e)
+    {
+        if (string.IsNullOrEmpty(e.AdAId) || string.IsNullOrEmpty(e.AdBId))
+        {
+            return;
+        }
+
+        var ids = await NegotiationRepository.LockAgreedForPairAsync(conn, tx, e.AdAId, e.AdBId, CancellationToken.None);
+        if (ids.Count == 0)
+        {
+            logger.LogWarning("SwapCancelled {SwapId} matches no agreed negotiation, ignoring", e.SwapId);
+            return;
+        }
+
+        var n = await NegotiationRepository.LoadAsync(conn, tx, ids[0], true, CancellationToken.None);
+        if (n is null || !n.CancelAgreed(e.Reason, clock.GetUtcNow()))
+        {
+            return;
+        }
+
         await NegotiationRepository.SaveAsync(conn, tx, n, CancellationToken.None);
         await NegotiationService.AddClosedEventAsync(conn, tx, n, NegotiationStatus.Cancelled, e.Reason, CancellationToken.None);
     }

@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -58,9 +59,12 @@ func (s *Service) FindMatches(ctx context.Context, req *matchingv1.FindMatchesRe
 	if req.GetAdId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "ad_id is required")
 	}
+	if _, err := uuid.Parse(req.GetAdId()); err != nil {
+		return nil, status.Error(codes.InvalidArgument, "ad_id must be a UUID")
+	}
 	me, err := index.Get(ctx, s.DB, req.GetAdId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "find matches: %v", err)
+		return nil, status.Errorf(codes.Internal, "find matches: %v", err)
 	}
 	if me == nil {
 		return nil, status.Error(codes.NotFound, "ad is not in the match index; publish it first")

@@ -19,7 +19,7 @@ public sealed partial class SwapWorkflow(
     TimeProvider clock,
     ILogger<SwapWorkflow> logger)
 {
-    public const string SystemUser = "system:swap";
+    public const string SystemUser = SystemIdentities.Swap;
 
     /// <summary>
     /// Handles AgreementReached. Safe to re-run at every step: the swap row is created once per negotiation,

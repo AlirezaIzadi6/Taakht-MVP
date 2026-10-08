@@ -90,7 +90,8 @@ func loadAdForUpdate(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*adRow, erro
 
 func loadAd(ctx context.Context, q interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}, id uuid.UUID) (*adRow, error) {
+}, id uuid.UUID,
+) (*adRow, error) {
 	r, err := scanAd(q.QueryRow(ctx, `SELECT `+adColumns+` FROM ad WHERE id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, status.Errorf(codes.NotFound, "ad %s not found", id)
@@ -108,7 +109,8 @@ type specVersion struct {
 
 func loadSpec(ctx context.Context, q interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}, id uuid.UUID, version int32) (*specVersion, error) {
+}, id uuid.UUID, version int32,
+) (*specVersion, error) {
 	var raw []byte
 	var at time.Time
 	err := q.QueryRow(ctx, `SELECT spec, created_at FROM ad_version WHERE ad_id = $1 AND version = $2`, id, version).Scan(&raw, &at)

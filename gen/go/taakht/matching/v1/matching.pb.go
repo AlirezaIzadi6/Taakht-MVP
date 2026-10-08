@@ -8,6 +8,7 @@ package matchingv1
 
 import (
 	v1 "github.com/taakht/taakht/gen/taakht/ad/v1"
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -279,7 +280,7 @@ var File_taakht_matching_v1_matching_proto protoreflect.FileDescriptor
 
 const file_taakht_matching_v1_matching_proto_rawDesc = "" +
 	"\n" +
-	"!taakht/matching/v1/matching.proto\x12\x12taakht.matching.v1\x1a\x15taakht/ad/v1/ad.proto\"^\n" +
+	"!taakht/matching/v1/matching.proto\x12\x12taakht.matching.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x15taakht/ad/v1/ad.proto\"^\n" +
 	"\bCriteria\x12'\n" +
 	"\x0fwant_categories\x18\x01 \x03(\tR\x0ewantCategories\x12)\n" +
 	"\x10neighborhood_ids\x18\x02 \x03(\tR\x0fneighborhoodIds\"_\n" +
@@ -295,10 +296,10 @@ const file_taakht_matching_v1_matching_proto_rawDesc = "" +
 	"\x0eSearchResponse\x12=\n" +
 	"\n" +
 	"candidates\x18\x01 \x03(\v2\x1d.taakht.matching.v1.CandidateR\n" +
-	"candidates2\xbd\x01\n" +
-	"\x0fMatchingService\x12O\n" +
-	"\x06Search\x12!.taakht.matching.v1.SearchRequest\x1a\".taakht.matching.v1.SearchResponse\x12Y\n" +
-	"\vFindMatches\x12&.taakht.matching.v1.FindMatchesRequest\x1a\".taakht.matching.v1.SearchResponseBQZ:github.com/taakht/taakht/gen/taakht/matching/v1;matchingv1\xaa\x02\x12Taakht.Matching.V1b\x06proto3"
+	"candidates2\x88\x02\n" +
+	"\x0fMatchingService\x12o\n" +
+	"\x06Search\x12!.taakht.matching.v1.SearchRequest\x1a\".taakht.matching.v1.SearchResponse\"\x1e\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/v1/matching/search\x12\x83\x01\n" +
+	"\vFindMatches\x12&.taakht.matching.v1.FindMatchesRequest\x1a\".taakht.matching.v1.SearchResponse\"(\x82\xd3\xe4\x93\x02\"\x12 /v1/matching/ads/{ad_id}/matchesBQZ:github.com/taakht/taakht/gen/taakht/matching/v1;matchingv1\xaa\x02\x12Taakht.Matching.V1b\x06proto3"
 
 var (
 	file_taakht_matching_v1_matching_proto_rawDescOnce sync.Once

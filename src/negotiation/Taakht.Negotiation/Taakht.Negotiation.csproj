@@ -18,11 +18,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="../../../api/proto/taakht/negotiation/v1/negotiation.proto" ProtoRoot="../../../api/proto" GrpcServices="Server" Link="Protos/negotiation.proto" />
-    <Protobuf Include="../../../api/proto/taakht/negotiation/v1/events.proto" ProtoRoot="../../../api/proto" GrpcServices="None" Link="Protos/negotiation_events.proto" />
-    <Protobuf Include="../../../api/proto/taakht/ad/v1/ad.proto" ProtoRoot="../../../api/proto" GrpcServices="Client" Link="Protos/ad.proto" />
-    <Protobuf Include="../../../api/proto/taakht/ad/v1/events.proto" ProtoRoot="../../../api/proto" GrpcServices="None" Link="Protos/ad_events.proto" />
-    <Protobuf Include="../../../api/proto/taakht/swap/v1/events.proto" ProtoRoot="../../../api/proto" GrpcServices="None" Link="Protos/swap_events.proto" />
+    <Protobuf Include="../../../third_party/google/api/annotations.proto" ProtoRoot="../../../third_party" GrpcServices="None" Link="Protos/google_api_annotations.proto" />
+    <Protobuf Include="../../../third_party/google/api/http.proto" ProtoRoot="../../../third_party" GrpcServices="None" Link="Protos/google_api_http.proto" />
+    <Protobuf Include="../../../api/proto/taakht/negotiation/v1/negotiation.proto" ProtoRoot="../../../api/proto" AdditionalImportDirs="../../../third_party" GrpcServices="Server" Link="Protos/negotiation.proto" />
+    <Protobuf Include="../../../api/proto/taakht/negotiation/v1/events.proto" ProtoRoot="../../../api/proto" AdditionalImportDirs="../../../third_party" GrpcServices="None" Link="Protos/negotiation_events.proto" />
+    <Protobuf Include="../../../api/proto/taakht/ad/v1/ad.proto" ProtoRoot="../../../api/proto" AdditionalImportDirs="../../../third_party" GrpcServices="Client" Link="Protos/ad.proto" />
+    <Protobuf Include="../../../api/proto/taakht/ad/v1/events.proto" ProtoRoot="../../../api/proto" AdditionalImportDirs="../../../third_party" GrpcServices="None" Link="Protos/ad_events.proto" />
+    <Protobuf Include="../../../api/proto/taakht/swap/v1/events.proto" ProtoRoot="../../../api/proto" AdditionalImportDirs="../../../third_party" GrpcServices="None" Link="Protos/swap_events.proto" />
   </ItemGroup>
 
   <ItemGroup>

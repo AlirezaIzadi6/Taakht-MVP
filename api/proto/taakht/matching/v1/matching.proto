@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package taakht.matching.v1;
 
+import "google/api/annotations.proto";
 import "taakht/ad/v1/ad.proto";
 
 option go_package = "github.com/taakht/taakht/gen/taakht/matching/v1;matchingv1";
@@ -9,9 +10,18 @@ option csharp_namespace = "Taakht.Matching.V1";
 
 service MatchingService {
   // Browse: a Criteria that is never stored.
-  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc Search(SearchRequest) returns (SearchResponse) {
+    option (google.api.http) = {
+      post: "/v1/matching/search"
+      body: "*"
+    };
+  }
   // Two-sided candidates for one of the caller's ads.
-  rpc FindMatches(FindMatchesRequest) returns (SearchResponse);
+  rpc FindMatches(FindMatchesRequest) returns (SearchResponse) {
+    option (google.api.http) = {
+      get: "/v1/matching/ads/{ad_id}/matches"
+    };
+  }
 }
 
 message Criteria {

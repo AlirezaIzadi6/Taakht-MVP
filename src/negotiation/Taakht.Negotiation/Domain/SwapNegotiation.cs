@@ -124,6 +124,9 @@ public sealed class SwapNegotiation
             [new Approval(requesterUserId, ApprovalKind.Ad, targetAd.Version)]);
     }
 
+    /// <summary>Upper bound for a price difference (toman); keeps amounts well inside bigint and sane.</summary>
+    public const long MaxPriceDifference = 1_000_000_000_000;
+
     public static bool IsOpenLike(NegotiationStatus status) =>
         status is NegotiationStatus.Open or NegotiationStatus.AgreementPending;
 
@@ -296,6 +299,20 @@ public sealed class SwapNegotiation
         return true;
     }
 
+    /// <summary>The swap of an agreed negotiation was cancelled (e.g. payment timeout). Returns false unless Agreed.</summary>
+    public bool CancelAgreed(string reason, DateTimeOffset now)
+    {
+        if (Status != NegotiationStatus.Agreed)
+        {
+            return false;
+        }
+
+        Status = NegotiationStatus.Cancelled;
+        CancelReason = reason;
+        Touch(now);
+        return true;
+    }
+
     /// <summary>System cancellation. Returns false when the negotiation is already closed.</summary>
     public bool Cancel(string reason, DateTimeOffset now)
     {
@@ -317,9 +334,9 @@ public sealed class SwapNegotiation
             throw new DomainException(DomainError.InvalidArgument, "both delivery methods are required");
         }
 
-        if (terms.PriceDifference < 0)
+        if (terms.PriceDifference is < 0 or > MaxPriceDifference)
         {
-            throw new DomainException(DomainError.InvalidArgument, "price difference cannot be negative");
+            throw new DomainException(DomainError.InvalidArgument, $"price difference must be between 0 and {MaxPriceDifference}");
         }
 
         if (terms.PriceDifference == 0)

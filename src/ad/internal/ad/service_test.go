@@ -130,11 +130,11 @@ func TestAdLifecycle(t *testing.T) {
 	_, err = s.EditAd(as("user-1"), &adv1.EditAdRequest{AdId: a.Id, ExpectedVersion: 2, Spec: &adv1.AdSpec{Title: "nofilter"}})
 	wantCode(t, err, codes.InvalidArgument)
 
-	old, err := s.GetAd(as("user-3"), &adv1.GetAdRequest{AdId: a.Id, Version: 1})
+	old, err := s.GetAd(as("user-1"), &adv1.GetAdRequest{AdId: a.Id, Version: 1})
 	if err != nil || old.Spec.Title != "book" || old.Version != 1 {
 		t.Fatalf("get v1: %v %v", old, err)
 	}
-	cur, err := s.GetAd(as("user-3"), &adv1.GetAdRequest{AdId: a.Id})
+	cur, err := s.GetAd(as(identity.SystemSwap), &adv1.GetAdRequest{AdId: a.Id})
 	if err != nil || cur.Version != 2 {
 		t.Fatalf("get current: %v %v", cur, err)
 	}
@@ -199,7 +199,7 @@ func TestLockAdsRulesAndIdempotency(t *testing.T) {
 	b := mustCreate(t, s, "user-2", "b")
 	publish(t, s, a) // b stays hidden: hidden ads are lockable too
 
-	_, err := s.LockAds(as("user-1"), lockReq("s0", a, b, 9, 1))
+	_, err := s.LockAds(as(identity.SystemSwap), lockReq("s0", a, b, 9, 1))
 	wantCode(t, err, codes.FailedPrecondition) // wrong version
 	st := func(ad *adv1.Ad) string {
 		var v string
@@ -210,7 +210,7 @@ func TestLockAdsRulesAndIdempotency(t *testing.T) {
 		t.Fatal("failed lock must change nothing")
 	}
 
-	if _, err := s.LockAds(as("user-1"), lockReq("s1", a, b, 1, 1)); err != nil {
+	if _, err := s.LockAds(as(identity.SystemSwap), lockReq("s1", a, b, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
 	if st(a) != StatusLocked || st(b) != StatusLocked {
@@ -218,18 +218,18 @@ func TestLockAdsRulesAndIdempotency(t *testing.T) {
 	}
 	// Retry with the same swap id and ads (either order) is OK and emits nothing new.
 	before := countEvents(t, pool, "taakht.ad.v1.AdLocked")
-	if _, err := s.LockAds(as("user-1"), lockReq("s1", b, a, 1, 1)); err != nil {
+	if _, err := s.LockAds(as(identity.SystemSwap), lockReq("s1", b, a, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
 	if countEvents(t, pool, "taakht.ad.v1.AdLocked") != before || before != 2 {
 		t.Fatalf("AdLocked events = %d", before)
 	}
 	// Another swap cannot take them; locked ads reject edits.
-	_, err = s.LockAds(as("user-1"), lockReq("s2", a, b, 1, 1))
+	_, err = s.LockAds(as(identity.SystemSwap), lockReq("s2", a, b, 1, 1))
 	wantCode(t, err, codes.FailedPrecondition)
 	_, err = s.EditAd(as("user-1"), &adv1.EditAdRequest{AdId: a.Id, ExpectedVersion: 1, Spec: spec("z")})
 	wantCode(t, err, codes.FailedPrecondition)
-	_, err = s.LockAds(as("user-1"), &adv1.LockAdsRequest{SwapId: "s3", Ads: []*adv1.AdRef{{AdId: a.Id, Version: 1}}})
+	_, err = s.LockAds(as(identity.SystemSwap), &adv1.LockAdsRequest{SwapId: "s3", Ads: []*adv1.AdRef{{AdId: a.Id, Version: 1}}})
 	wantCode(t, err, codes.InvalidArgument)
 }
 
@@ -253,13 +253,12 @@ func TestLockAdsConcurrentOverlap(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				_, err := s.LockAds(as("user-1"), lockReq(fmt.Sprintf("swap-%d", i), a, c, 1, 1))
-				switch status.Code(err) {
-				case codes.OK:
+				_, err := s.LockAds(as(identity.SystemSwap), lockReq(fmt.Sprintf("swap-%d", i), a, c, 1, 1))
+				if code := status.Code(err); code == codes.OK {
 					wins.Add(1)
-				case codes.FailedPrecondition:
+				} else if code == codes.FailedPrecondition {
 					rejected.Add(1)
-				default:
+				} else {
 					t.Errorf("unexpected error: %v", err)
 				}
 			}()
@@ -295,7 +294,7 @@ func TestSwapEventConsumers(t *testing.T) {
 	a := mustCreate(t, s, "user-1", "a")
 	b := mustCreate(t, s, "user-2", "b")
 	publish(t, s, a) // a published, b hidden before the lock
-	if _, err := s.LockAds(as("user-1"), lockReq("sw", a, b, 1, 1)); err != nil {
+	if _, err := s.LockAds(as(identity.SystemSwap), lockReq("sw", a, b, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
 	h := Handlers()
@@ -306,8 +305,8 @@ func TestSwapEventConsumers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	ga, _ := s.GetAd(as("user-3"), &adv1.GetAdRequest{AdId: a.Id})
-	gb, _ := s.GetAd(as("user-3"), &adv1.GetAdRequest{AdId: b.Id})
+	ga, _ := s.GetAd(as(identity.SystemSwap), &adv1.GetAdRequest{AdId: a.Id})
+	gb, _ := s.GetAd(as(identity.SystemSwap), &adv1.GetAdRequest{AdId: b.Id})
 	if ga.Status != adv1.AdStatus_AD_STATUS_PUBLISHED || gb.Status != adv1.AdStatus_AD_STATUS_HIDDEN {
 		t.Fatalf("release restored %v / %v", ga.Status, gb.Status)
 	}
@@ -320,12 +319,12 @@ func TestSwapEventConsumers(t *testing.T) {
 	if err := consume.Process(ctx, pool, Group, late, h["taakht.swap.v1.SwapCompleted"]); err != nil {
 		t.Fatal(err)
 	}
-	if ga, _ = s.GetAd(as("user-3"), &adv1.GetAdRequest{AdId: a.Id}); ga.Status != adv1.AdStatus_AD_STATUS_PUBLISHED {
+	if ga, _ = s.GetAd(as(identity.SystemSwap), &adv1.GetAdRequest{AdId: a.Id}); ga.Status != adv1.AdStatus_AD_STATUS_PUBLISHED {
 		t.Fatalf("status = %v", ga.Status)
 	}
 
 	// New swap on the same ads completes.
-	if _, err := s.LockAds(as("user-1"), lockReq("sw2", a, b, 1, 1)); err != nil {
+	if _, err := s.LockAds(as(identity.SystemSwap), lockReq("sw2", a, b, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
 	done := envelopeOf(t, &swapv1.SwapCompleted{SwapId: "sw2", AdAId: a.Id, AdBId: b.Id})
@@ -333,7 +332,7 @@ func TestSwapEventConsumers(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ad := range []*adv1.Ad{a, b} {
-		g, _ := s.GetAd(as("user-3"), &adv1.GetAdRequest{AdId: ad.Id})
+		g, _ := s.GetAd(as(identity.SystemSwap), &adv1.GetAdRequest{AdId: ad.Id})
 		if g.Status != adv1.AdStatus_AD_STATUS_CLOSED {
 			t.Fatalf("status = %v", g.Status)
 		}
@@ -342,6 +341,66 @@ func TestSwapEventConsumers(t *testing.T) {
 		t.Fatalf("AdClosed = %d", n)
 	}
 	// Closed ads can be neither edited nor locked again.
-	_, err := s.LockAds(as("user-1"), lockReq("sw3", a, b, 1, 1))
+	_, err := s.LockAds(as(identity.SystemSwap), lockReq("sw3", a, b, 1, 1))
 	wantCode(t, err, codes.FailedPrecondition)
+}
+
+func TestLockAdsRequiresSwapIdentity(t *testing.T) {
+	s, _ := newTestService(t)
+	a := mustCreate(t, s, "user-1", "a")
+	b := mustCreate(t, s, "user-2", "b")
+	for _, who := range []string{"user-1", "user-2", identity.SystemNegotiation} {
+		_, err := s.LockAds(as(who), lockReq("s-auth", a, b, 1, 1))
+		wantCode(t, err, codes.PermissionDenied)
+	}
+	if _, err := s.LockAds(as(identity.SystemSwap), lockReq("s-auth", a, b, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGetAdVisibility(t *testing.T) {
+	s, _ := newTestService(t)
+	a := mustCreate(t, s, "user-1", "a")
+
+	// Hidden: only the owner and system identities see it; others get NOT_FOUND.
+	_, err := s.GetAd(as("user-2"), &adv1.GetAdRequest{AdId: a.Id})
+	wantCode(t, err, codes.NotFound)
+	for _, who := range []string{"user-1", identity.SystemNegotiation, identity.SystemSwap} {
+		if _, err := s.GetAd(as(who), &adv1.GetAdRequest{AdId: a.Id}); err != nil {
+			t.Fatalf("%s: %v", who, err)
+		}
+	}
+
+	publish(t, s, a)
+	if _, err := s.GetAd(as("user-2"), &adv1.GetAdRequest{AdId: a.Id}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EditAd(as("user-1"), &adv1.EditAdRequest{AdId: a.Id, ExpectedVersion: 1, Spec: spec("v2")}); err != nil {
+		t.Fatal(err)
+	}
+	// Old versions are for the owner and systems only.
+	_, err = s.GetAd(as("user-2"), &adv1.GetAdRequest{AdId: a.Id, Version: 1})
+	wantCode(t, err, codes.NotFound)
+	if _, err := s.GetAd(as("user-2"), &adv1.GetAdRequest{AdId: a.Id, Version: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetAd(as("user-1"), &adv1.GetAdRequest{AdId: a.Id, Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetAd(as(identity.SystemNegotiation), &adv1.GetAdRequest{AdId: a.Id, Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUndecodableSwapEventIsPermanent(t *testing.T) {
+	s, pool := newTestService(t)
+	_ = s
+	env := &commonv1.Envelope{EventId: uuid.NewString(), Type: "taakht.swap.v1.SwapCompleted", Payload: []byte{0xff, 0xff, 0xff}}
+	for typ, h := range Handlers() {
+		err := consume.Process(context.Background(), pool, Group, env, h)
+		if !consume.IsPermanent(err) {
+			t.Fatalf("%s: err = %v, want permanent", typ, err)
+		}
+		env.EventId = uuid.NewString()
+	}
 }

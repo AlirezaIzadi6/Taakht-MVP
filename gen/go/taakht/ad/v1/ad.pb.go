@@ -7,6 +7,7 @@
 package adv1
 
 import (
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
@@ -613,7 +614,7 @@ var File_taakht_ad_v1_ad_proto protoreflect.FileDescriptor
 
 const file_taakht_ad_v1_ad_proto_rawDesc = "" +
 	"\n" +
-	"\x15taakht/ad/v1/ad.proto\x12\ftaakht.ad.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe0\x01\n" +
+	"\x15taakht/ad/v1/ad.proto\x12\ftaakht.ad.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe0\x01\n" +
 	"\x06AdSpec\x12\x14\n" +
 	"\x05title\x18\x01 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12#\n" +
@@ -655,14 +656,14 @@ const file_taakht_ad_v1_ad_proto_rawDesc = "" +
 	"\x13AD_STATUS_PUBLISHED\x10\x01\x12\x14\n" +
 	"\x10AD_STATUS_HIDDEN\x10\x02\x12\x14\n" +
 	"\x10AD_STATUS_LOCKED\x10\x03\x12\x14\n" +
-	"\x10AD_STATUS_CLOSED\x10\x042\xb0\x03\n" +
-	"\tAdService\x12;\n" +
-	"\bCreateAd\x12\x1d.taakht.ad.v1.CreateAdRequest\x1a\x10.taakht.ad.v1.Ad\x127\n" +
-	"\x06EditAd\x12\x1b.taakht.ad.v1.EditAdRequest\x1a\x10.taakht.ad.v1.Ad\x128\n" +
-	"\tPublishAd\x12\x19.taakht.ad.v1.AdIdRequest\x1a\x10.taakht.ad.v1.Ad\x125\n" +
-	"\x06HideAd\x12\x19.taakht.ad.v1.AdIdRequest\x1a\x10.taakht.ad.v1.Ad\x125\n" +
-	"\x05GetAd\x12\x1a.taakht.ad.v1.GetAdRequest\x1a\x10.taakht.ad.v1.Ad\x12D\n" +
-	"\tListMyAds\x12\x16.google.protobuf.Empty\x1a\x1f.taakht.ad.v1.ListMyAdsResponse\x12?\n" +
+	"\x10AD_STATUS_CLOSED\x10\x042\xcc\x04\n" +
+	"\tAdService\x12R\n" +
+	"\bCreateAd\x12\x1d.taakht.ad.v1.CreateAdRequest\x1a\x10.taakht.ad.v1.Ad\"\x15\x82\xd3\xe4\x93\x02\x0f:\x04spec\"\a/v1/ads\x12S\n" +
+	"\x06EditAd\x12\x1b.taakht.ad.v1.EditAdRequest\x1a\x10.taakht.ad.v1.Ad\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\x1a\x0f/v1/ads/{ad_id}\x12Y\n" +
+	"\tPublishAd\x12\x19.taakht.ad.v1.AdIdRequest\x1a\x10.taakht.ad.v1.Ad\"\x1f\x82\xd3\xe4\x93\x02\x19\"\x17/v1/ads/{ad_id}:publish\x12S\n" +
+	"\x06HideAd\x12\x19.taakht.ad.v1.AdIdRequest\x1a\x10.taakht.ad.v1.Ad\"\x1c\x82\xd3\xe4\x93\x02\x16\"\x14/v1/ads/{ad_id}:hide\x12N\n" +
+	"\x05GetAd\x12\x1a.taakht.ad.v1.GetAdRequest\x1a\x10.taakht.ad.v1.Ad\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/ads/{ad_id}\x12U\n" +
+	"\tListMyAds\x12\x16.google.protobuf.Empty\x1a\x1f.taakht.ad.v1.ListMyAdsResponse\"\x0f\x82\xd3\xe4\x93\x02\t\x12\a/v1/ads\x12?\n" +
 	"\aLockAds\x12\x1c.taakht.ad.v1.LockAdsRequest\x1a\x16.google.protobuf.EmptyB?Z.github.com/taakht/taakht/gen/taakht/ad/v1;adv1\xaa\x02\fTaakht.Ad.V1b\x06proto3"
 
 var (

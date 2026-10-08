@@ -22,13 +22,13 @@ Migrations are embedded and applied at startup (database `swap` must exist, as c
 
 ```bash
 grpcurl -plaintext -H 'x-user-id: user-1' localhost:9004 taakht.swap.v1.SwapService/ListMySwaps
-grpcurl -plaintext -H 'x-user-id: dev' -d '{"swap_id":"<id>","user_id":"user-1"}' localhost:9004 taakht.swap.v1.SwapService/SimulateLockerFeePaid
+grpcurl -plaintext -H 'x-user-id: user-1' -d '{"swap_id":"<id>","user_id":"user-1"}' localhost:9004 taakht.swap.v1.SwapService/SimulateLockerFeePaid
 ```
 
 ## Behavior
 
-- `AgreementReached` creates the swap (unique per negotiation) as `LOCKING`, calls `ad.LockAds(swap_id, ...)` with `x-user-id: system:swap`, then moves to `AWAITING_PAYMENT` (deadline = now + `PAYMENT_DEADLINE`, emits `ExclusiveLockAcquired`) or `REJECTED` (`SwapRejected`) when the Ad service answers `FAILED_PRECONDITION`/`NOT_FOUND`. With no `LOCKER` leg it goes straight to `COMPLETED` (`SwapCompleted` is emitted too). Transient Ad errors throw, so the consumer retries; the handler is state-checked and each swap write is its own short transaction (no DB transaction is held across the gRPC call).
-- `SimulateLockerFeePaid` marks the leg of `user_id` paid (mock webhook, any caller); all locker legs paid gives `COMPLETED` + `SwapCompleted`.
+- `AgreementReached` creates the swap (unique per negotiation) as `LOCKING`, calls `ad.LockAds(swap_id, ...)` with `x-user-id: system:swap`, then moves to `AWAITING_PAYMENT` (deadline = now + `PAYMENT_DEADLINE`, emits `ExclusiveLockAcquired`) or `REJECTED` (`SwapRejected`) when the Ad service answers `FAILED_PRECONDITION`/`NOT_FOUND`/`INVALID_ARGUMENT`/`PERMISSION_DENIED` (permanent refusals; other errors are retried). With no `LOCKER` leg it goes straight to `COMPLETED` (`SwapCompleted` is emitted too). Transient Ad errors throw, so the consumer retries; the handler is state-checked and each swap write is its own short transaction (no DB transaction is held across the gRPC call).
+- `SimulateLockerFeePaid` marks the caller's own leg paid (mock webhook): `user_id` must equal the caller and the caller must be a party (`PERMISSION_DENIED`). It exists only when `ENABLE_DEV_ENDPOINTS=true` or the environment is Development (otherwise `UNIMPLEMENTED`); all locker legs paid gives `COMPLETED` + `SwapCompleted`.
 - A sweeper (every 5 s) asks the partner mock for the payment status of overdue swaps and cancels the unpaid ones (`SwapCancelled`, `defaulting_user_id` = first unpaid locker leg owner). Every transition runs under a row lock with an UPDATE conditional on the status read, so a payment and the sweeper cannot both win.
 - `GetSwap` / `ListMySwaps` only return swaps where the caller owns a leg (`PERMISSION_DENIED` otherwise).
 

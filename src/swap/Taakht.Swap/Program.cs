@@ -27,6 +27,8 @@ builder.Services.AddTaakhtPlatform(config);
 builder.Services.AddTaakhtOutboxRelay();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new SwapOptions(paymentDeadline));
+builder.Services.AddSingleton(new SwapApiOptions(
+    builder.Environment.IsDevelopment() || string.Equals(config["ENABLE_DEV_ENDPOINTS"], "true", StringComparison.OrdinalIgnoreCase)));
 builder.Services.AddSingleton<SwapStore>();
 builder.Services.AddSingleton<IDeliveryProvider, MockDeliveryProvider>();
 builder.Services.AddSingleton<SwapWorkflow>();

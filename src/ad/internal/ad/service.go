@@ -153,7 +153,9 @@ func (s *Service) transition(ctx context.Context, adID string, apply func(*adRow
 	return result, nil
 }
 
-// GetAd is open to any authenticated user: negotiation reads other people's ads.
+// GetAd: owners read all their ads and versions, system identities (negotiation, swap) read anything,
+// everyone else sees only published ads at their current version. Anything else is NOT_FOUND so
+// existence is not leaked.
 func (s *Service) GetAd(ctx context.Context, req *adv1.GetAdRequest) (*adv1.Ad, error) {
 	id, err := parseID(req.GetAdId())
 	if err != nil {
@@ -169,6 +171,11 @@ func (s *Service) GetAd(ctx context.Context, req *adv1.GetAdRequest) (*adv1.Ad, 
 	version := req.Version
 	if version == 0 {
 		version = row.Version
+	}
+	caller := identity.UserID(ctx)
+	if caller != row.OwnerID && !identity.IsSystem(caller) &&
+		(row.Status != StatusPublished || version != row.Version) {
+		return nil, status.Error(codes.NotFound, "ad not found")
 	}
 	sv, err := loadSpec(ctx, s.pool, id, version)
 	if err != nil {
@@ -211,7 +218,11 @@ func (s *Service) ListMyAds(ctx context.Context, _ *emptypb.Empty) (*adv1.ListMy
 }
 
 // LockAds atomically claims both ads for a swap, or none. Idempotent by swap_id.
+// Only the swap service (identity system:swap) may call it.
 func (s *Service) LockAds(ctx context.Context, req *adv1.LockAdsRequest) (*emptypb.Empty, error) {
+	if identity.UserID(ctx) != identity.SystemSwap {
+		return nil, status.Error(codes.PermissionDenied, "only the swap service can lock ads")
+	}
 	if req.GetSwapId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "swap_id is required")
 	}

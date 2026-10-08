@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package taakht.ad.v1;
 
+import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -43,14 +44,40 @@ message Ad {
 
 service AdService {
   // New ads start Hidden.
-  rpc CreateAd(CreateAdRequest) returns (Ad);
+  rpc CreateAd(CreateAdRequest) returns (Ad) {
+    option (google.api.http) = {
+      post: "/v1/ads"
+      body: "spec"
+    };
+  }
   // Creates a new version. Fails with ABORTED if expected_version is stale.
-  rpc EditAd(EditAdRequest) returns (Ad);
+  rpc EditAd(EditAdRequest) returns (Ad) {
+    option (google.api.http) = {
+      put: "/v1/ads/{ad_id}"
+      body: "*"
+    };
+  }
   // Needs at least one filter (want category or neighborhood).
-  rpc PublishAd(AdIdRequest) returns (Ad);
-  rpc HideAd(AdIdRequest) returns (Ad);
-  rpc GetAd(GetAdRequest) returns (Ad);
-  rpc ListMyAds(google.protobuf.Empty) returns (ListMyAdsResponse);
+  rpc PublishAd(AdIdRequest) returns (Ad) {
+    option (google.api.http) = {
+      post: "/v1/ads/{ad_id}:publish"
+    };
+  }
+  rpc HideAd(AdIdRequest) returns (Ad) {
+    option (google.api.http) = {
+      post: "/v1/ads/{ad_id}:hide"
+    };
+  }
+  rpc GetAd(GetAdRequest) returns (Ad) {
+    option (google.api.http) = {
+      get: "/v1/ads/{ad_id}"
+    };
+  }
+  rpc ListMyAds(google.protobuf.Empty) returns (ListMyAdsResponse) {
+    option (google.api.http) = {
+      get: "/v1/ads"
+    };
+  }
   // Atomically claims both ads for a swap. Idempotent by swap_id.
   // FAILED_PRECONDITION if an ad is not lockable or its version differs from the agreed one.
   rpc LockAds(LockAdsRequest) returns (google.protobuf.Empty);

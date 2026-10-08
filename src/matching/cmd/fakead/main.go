@@ -23,6 +23,12 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	ctx := context.Background()
 	brokers := "localhost:9094"
 	if v := os.Getenv("KAFKA_BROKERS"); v != "" {
@@ -30,7 +36,7 @@ func main() {
 	}
 	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers))
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer cl.Close()
 
@@ -41,7 +47,7 @@ func main() {
 
 	conn, err := grpc.NewClient("localhost:9002", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer conn.Close()
 	c := matchingv1.NewMatchingServiceClient(conn)
@@ -51,6 +57,7 @@ func main() {
 	fmt.Println("Search:", sr, err)
 	fm, err := c.FindMatches(uctx, &matchingv1.FindMatchesRequest{AdId: a})
 	fmt.Println("FindMatches:", fm, err)
+	return nil
 }
 
 func publish(ctx context.Context, cl *kgo.Client, owner, have, want string) string {

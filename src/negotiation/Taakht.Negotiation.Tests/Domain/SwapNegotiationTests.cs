@@ -196,6 +196,29 @@ public class SwapNegotiationTests
     }
 
     [Fact]
+    public void Revise_PriceUpperBound()
+    {
+        var n = Open();
+        n.Revise(_target, 1, new Terms(DeliveryMethod.InPerson, DeliveryMethod.InPerson, SwapNegotiation.MaxPriceDifference, _target), _now);
+        Assert.Equal(DomainError.InvalidArgument, ErrorOf(() =>
+            n.Revise(_requester, 2, new Terms(DeliveryMethod.InPerson, DeliveryMethod.InPerson, SwapNegotiation.MaxPriceDifference + 1, _target), _now)));
+    }
+
+    [Fact]
+    public void CancelAgreed_OnlyFromAgreed()
+    {
+        var n = AllApproved();
+        Assert.False(n.CancelAgreed("late", _now));
+        n.ReachAgreement(_versions, _now);
+        Assert.False(n.CancelAgreed("not yet locked", _now));
+        Assert.True(n.MarkAgreed(_now));
+        Assert.True(n.CancelAgreed("fee not paid", _now));
+        Assert.Equal(NegotiationStatus.Cancelled, n.Status);
+        Assert.Equal("fee not paid", n.CancelReason);
+        Assert.False(n.CancelAgreed("again", _now));
+    }
+
+    [Fact]
     public void Revise_UnspecifiedDelivery_Invalid()
     {
         var n = Open();

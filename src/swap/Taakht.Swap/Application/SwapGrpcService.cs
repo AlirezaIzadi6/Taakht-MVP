@@ -7,7 +7,10 @@ using SwapPb = Taakht.Swap.V1;
 
 namespace Taakht.Swap.Application;
 
-public sealed class SwapGrpcService(SwapStore store, SwapWorkflow workflow) : SwapPb.SwapService.SwapServiceBase
+/// <summary>Gates the mock-partner endpoints (ENABLE_DEV_ENDPOINTS=true or the Development environment).</summary>
+public sealed record SwapApiOptions(bool DevEndpointsEnabled);
+
+public sealed class SwapGrpcService(SwapStore store, SwapWorkflow workflow, SwapApiOptions api) : SwapPb.SwapService.SwapServiceBase
 {
     public override async Task<SwapPb.Swap> GetSwap(SwapPb.SwapIdRequest request, ServerCallContext context)
     {
@@ -32,13 +35,31 @@ public sealed class SwapGrpcService(SwapStore store, SwapWorkflow workflow) : Sw
 
     public override async Task<SwapPb.Swap> SimulateLockerFeePaid(SwapPb.SimulateLockerFeePaidRequest request, ServerCallContext context)
     {
+        if (!api.DevEndpointsEnabled)
+        {
+            throw new RpcException(new Status(StatusCode.Unimplemented, "SimulateLockerFeePaid is only available when dev endpoints are enabled"));
+        }
+
+        var caller = CurrentUser.Id(context);
         if (string.IsNullOrWhiteSpace(request.UserId))
         {
             throw new RpcException(new Status(StatusCode.InvalidArgument, "user_id is required"));
         }
 
+        if (!string.Equals(caller, request.UserId, StringComparison.Ordinal))
+        {
+            throw new RpcException(new Status(StatusCode.PermissionDenied, "you can only pay your own leg"));
+        }
+
         try
         {
+            var swap = await store.GetAsync(ParseId(request.SwapId), context.CancellationToken)
+                ?? throw new RpcException(new Status(StatusCode.NotFound, "swap not found"));
+            if (!swap.IsParty(caller))
+            {
+                throw new RpcException(new Status(StatusCode.PermissionDenied, "not a party of this swap"));
+            }
+
             return ToProto(await workflow.RecordFeePaidAsync(ParseId(request.SwapId), request.UserId, context.CancellationToken));
         }
         catch (KeyNotFoundException ex)

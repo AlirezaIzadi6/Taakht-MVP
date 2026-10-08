@@ -15,15 +15,16 @@ import (
 )
 
 // Run serves on addr until ctx is cancelled, then stops gracefully. register adds services.
-// Reflection is on unless TAAKHT_GRPC_REFLECTION=off.
+// Reflection is off unless TAAKHT_GRPC_REFLECTION=on.
 func Run(ctx context.Context, addr string, register func(*grpc.Server)) error {
-	lis, err := net.Listen("tcp", addr)
+	var lc net.ListenConfig
+	lis, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("server: listen %s: %w", addr, err)
 	}
 	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(identity.ServerInterceptor()))
 	register(srv)
-	if os.Getenv("TAAKHT_GRPC_REFLECTION") != "off" {
+	if os.Getenv("TAAKHT_GRPC_REFLECTION") == "on" {
 		reflection.Register(srv)
 	}
 

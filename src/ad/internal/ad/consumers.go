@@ -2,7 +2,6 @@ package ad
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	adv1 "github.com/taakht/taakht/gen/taakht/ad/v1"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"google.golang.org/protobuf/proto"
 )
 
 // Group is the consumer group (and processed_events consumer) of this service.
@@ -31,8 +29,8 @@ func Handlers() map[string]consume.Handler {
 
 func onSwapCompleted(ctx context.Context, tx pgx.Tx, env *commonv1.Envelope) error {
 	ev := &swapv1.SwapCompleted{}
-	if err := proto.Unmarshal(env.Payload, ev); err != nil {
-		return fmt.Errorf("decode SwapCompleted: %w", err)
+	if err := consume.Decode(env, ev); err != nil {
+		return err
 	}
 	return settle(ctx, tx, ev.SwapId, []string{ev.AdAId, ev.AdBId}, func(row *adRow) error {
 		if _, err := tx.Exec(ctx, `UPDATE ad SET status = 'closed', status_before_lock = NULL, updated_at = $2 WHERE id = $1`,
@@ -48,8 +46,8 @@ func onSwapCompleted(ctx context.Context, tx pgx.Tx, env *commonv1.Envelope) err
 
 func onSwapCancelled(ctx context.Context, tx pgx.Tx, env *commonv1.Envelope) error {
 	ev := &swapv1.SwapCancelled{}
-	if err := proto.Unmarshal(env.Payload, ev); err != nil {
-		return fmt.Errorf("decode SwapCancelled: %w", err)
+	if err := consume.Decode(env, ev); err != nil {
+		return err
 	}
 	return settle(ctx, tx, ev.SwapId, []string{ev.AdAId, ev.AdBId}, func(row *adRow) error {
 		restored := row.StatusBeforeLock

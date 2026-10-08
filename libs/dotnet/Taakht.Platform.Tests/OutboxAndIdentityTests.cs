@@ -71,4 +71,27 @@ public class OutboxAndIdentityTests
 
         protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders) => Task.CompletedTask;
     }
+
+    [Theory]
+    [InlineData("user-1", true)]
+    [InlineData("system:swap", true)]
+    [InlineData("", false)]
+    [InlineData("user\n1", false)]
+    [InlineData("user\u0000", false)]
+    public void IsValid_rejects_control_characters(string id, bool valid) => Assert.Equal(valid, CurrentUser.IsValid(id));
+
+    [Fact]
+    public void IsValid_rejects_overlong_ids()
+    {
+        Assert.True(CurrentUser.IsValid(new string('a', 64)));
+        Assert.False(CurrentUser.IsValid(new string('a', 65)));
+    }
+
+    [Fact]
+    public void System_identities_are_recognised_by_prefix()
+    {
+        Assert.True(SystemIdentities.IsSystem(SystemIdentities.Negotiation));
+        Assert.False(SystemIdentities.IsSystem("user-1"));
+        Assert.False(SystemIdentities.IsSystem(null));
+    }
 }

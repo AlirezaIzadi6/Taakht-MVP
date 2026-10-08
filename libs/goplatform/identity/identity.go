@@ -3,6 +3,8 @@ package identity
 
 import (
 	"context"
+	"strings"
+	"unicode"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -13,6 +15,33 @@ import (
 // Header is the metadata key holding the caller id.
 const Header = "x-user-id"
 
+// SystemPrefix marks service identities (never real users); SystemSwap and SystemNegotiation
+// are the ones used for service-to-service calls.
+const (
+	SystemPrefix      = "system:"
+	SystemSwap        = "system:swap"
+	SystemNegotiation = "system:negotiation"
+)
+
+// maxIDLen bounds the caller id; longer values are rejected.
+const maxIDLen = 64
+
+// IsSystem reports whether id is a service identity.
+func IsSystem(id string) bool { return strings.HasPrefix(id, SystemPrefix) }
+
+// Valid reports whether id is a usable caller id: 1..64 bytes without control characters.
+func Valid(id string) bool {
+	if id == "" || len(id) > maxIDLen {
+		return false
+	}
+	for _, r := range id {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
 type ctxKey struct{}
 
 // ServerInterceptor requires x-user-id and stores it in the context.
@@ -21,6 +50,9 @@ func ServerInterceptor() grpc.UnaryServerInterceptor {
 		id := fromMetadata(ctx)
 		if id == "" {
 			return nil, status.Error(codes.Unauthenticated, "missing x-user-id")
+		}
+		if !Valid(id) {
+			return nil, status.Error(codes.Unauthenticated, "invalid x-user-id")
 		}
 		return h(context.WithValue(ctx, ctxKey{}, id), req)
 	}

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package taakht.swap.v1;
 
+import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "taakht/negotiation/v1/negotiation.proto";
@@ -42,10 +43,23 @@ message Swap {
 }
 
 service SwapService {
-  rpc GetSwap(SwapIdRequest) returns (Swap);
-  rpc ListMySwaps(google.protobuf.Empty) returns (ListMySwapsResponse);
+  rpc GetSwap(SwapIdRequest) returns (Swap) {
+    option (google.api.http) = {
+      get: "/v1/swaps/{swap_id}"
+    };
+  }
+  rpc ListMySwaps(google.protobuf.Empty) returns (ListMySwapsResponse) {
+    option (google.api.http) = {
+      get: "/v1/swaps"
+    };
+  }
   // MOCK of the locker partner webhook (LockerFeePaid). Dev only.
-  rpc SimulateLockerFeePaid(SimulateLockerFeePaidRequest) returns (Swap);
+  rpc SimulateLockerFeePaid(SimulateLockerFeePaidRequest) returns (Swap) {
+    option (google.api.http) = {
+      post: "/v1/dev/swaps/{swap_id}/locker-fee-paid:simulate"
+      body: "*"
+    };
+  }
 }
 
 message SwapIdRequest {

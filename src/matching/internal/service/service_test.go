@@ -55,6 +55,9 @@ func TestSearchAndFindMatches(t *testing.T) {
 	if _, err := svc.FindMatches(identity.WithUserID(ctx, "user-2"), &matchingv1.FindMatchesRequest{AdId: mine}); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("expected PermissionDenied, got %v", err)
 	}
+	if _, err := svc.FindMatches(ctx, &matchingv1.FindMatchesRequest{AdId: "not-a-uuid"}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("malformed ad_id should be INVALID_ARGUMENT, got %v", err)
+	}
 	if _, err := svc.FindMatches(ctx, &matchingv1.FindMatchesRequest{AdId: uuid.NewString()}); status.Code(err) != codes.NotFound {
 		t.Fatalf("expected NotFound, got %v", err)
 	}

@@ -38,42 +38,49 @@ type Handlers struct {
 // Map returns the handlers keyed by envelope type.
 func (h *Handlers) Map() map[string]Handler {
 	return map[string]Handler{
-		"taakht.ad.v1.AdPublished": h.onSnapshot(func(m proto.Message) *adv1.Ad { return m.(*adv1.AdPublished).GetAd() }, func() proto.Message { return &adv1.AdPublished{} }),
-		"taakht.ad.v1.AdEdited":    h.onSnapshot(func(m proto.Message) *adv1.Ad { return m.(*adv1.AdEdited).GetAd() }, func() proto.Message { return &adv1.AdEdited{} }),
-		"taakht.ad.v1.AdReleased":  h.onSnapshot(func(m proto.Message) *adv1.Ad { return m.(*adv1.AdReleased).GetAd() }, func() proto.Message { return &adv1.AdReleased{} }),
-		"taakht.ad.v1.AdHidden": h.onRemove(func() proto.Message { return &adv1.AdHidden{} },
-			func(m proto.Message) string { return m.(*adv1.AdHidden).GetAdId() }),
-		"taakht.ad.v1.AdLocked": h.onRemove(func() proto.Message { return &adv1.AdLocked{} },
-			func(m proto.Message) string { return m.(*adv1.AdLocked).GetAdId() }),
-		"taakht.ad.v1.AdClosed": h.onRemove(func() proto.Message { return &adv1.AdClosed{} },
-			func(m proto.Message) string { return m.(*adv1.AdClosed).GetAdId() }),
+		"taakht.ad.v1.AdPublished": onSnapshot[adv1.AdPublished](h),
+		"taakht.ad.v1.AdEdited":    onSnapshot[adv1.AdEdited](h),
+		"taakht.ad.v1.AdReleased":  onSnapshot[adv1.AdReleased](h),
+		"taakht.ad.v1.AdHidden":    onRemove[adv1.AdHidden](),
+		"taakht.ad.v1.AdLocked":    onRemove[adv1.AdLocked](),
+		"taakht.ad.v1.AdClosed":    onRemove[adv1.AdClosed](),
 	}
 }
 
-func (h *Handlers) onSnapshot(ad func(proto.Message) *adv1.Ad, newMsg func() proto.Message) Handler {
+// onSnapshot decodes an event carrying a full ad snapshot and applies it.
+func onSnapshot[T any, P interface {
+	*T
+	proto.Message
+	GetAd() *adv1.Ad
+}](h *Handlers) Handler {
 	return func(ctx context.Context, tx pgx.Tx, env *commonv1.Envelope) error {
-		msg := newMsg()
-		if err := proto.Unmarshal(env.GetPayload(), msg); err != nil {
-			return fmt.Errorf("decode %s: %w", env.GetType(), err)
+		msg := P(new(T))
+		if err := consume.Decode(env, msg); err != nil {
+			return err
 		}
-		return h.ApplySnapshot(ctx, tx, ad(msg))
+		return h.ApplySnapshot(ctx, tx, msg.GetAd())
 	}
 }
 
-func (h *Handlers) onRemove(newMsg func() proto.Message, id func(proto.Message) string) Handler {
+// onRemove decodes an event that only carries an ad id and removes that ad from the index.
+func onRemove[T any, P interface {
+	*T
+	proto.Message
+	GetAdId() string
+}]() Handler {
 	return func(ctx context.Context, tx pgx.Tx, env *commonv1.Envelope) error {
-		msg := newMsg()
-		if err := proto.Unmarshal(env.GetPayload(), msg); err != nil {
-			return fmt.Errorf("decode %s: %w", env.GetType(), err)
+		msg := P(new(T))
+		if err := consume.Decode(env, msg); err != nil {
+			return err
 		}
-		return index.Delete(ctx, tx, id(msg))
+		return index.Delete(ctx, tx, msg.GetAdId())
 	}
 }
 
 // ApplySnapshot indexes a published snapshot (and matches it) or removes a non-published one.
 func (h *Handlers) ApplySnapshot(ctx context.Context, tx pgx.Tx, ad *adv1.Ad) error {
 	if ad == nil || ad.GetId() == "" {
-		return fmt.Errorf("event without ad snapshot")
+		return consume.Permanent(fmt.Errorf("event without ad snapshot"))
 	}
 	if ad.GetStatus() != adv1.AdStatus_AD_STATUS_PUBLISHED {
 		return index.Delete(ctx, tx, ad.GetId())

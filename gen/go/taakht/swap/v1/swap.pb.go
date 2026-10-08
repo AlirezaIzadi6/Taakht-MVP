@@ -8,6 +8,7 @@ package swapv1
 
 import (
 	v1 "github.com/taakht/taakht/gen/taakht/negotiation/v1"
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
@@ -406,7 +407,7 @@ var File_taakht_swap_v1_swap_proto protoreflect.FileDescriptor
 
 const file_taakht_swap_v1_swap_proto_rawDesc = "" +
 	"\n" +
-	"\x19taakht/swap/v1/swap.proto\x12\x0etaakht.swap.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'taakht/negotiation/v1/negotiation.proto\"\x83\x01\n" +
+	"\x19taakht/swap/v1/swap.proto\x12\x0etaakht.swap.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'taakht/negotiation/v1/negotiation.proto\"\x83\x01\n" +
 	"\x03Leg\x12\"\n" +
 	"\rowner_user_id\x18\x01 \x01(\tR\vownerUserId\x12=\n" +
 	"\x06method\x18\x02 \x01(\x0e2%.taakht.negotiation.v1.DeliveryMethodR\x06method\x12\x19\n" +
@@ -438,11 +439,11 @@ const file_taakht_swap_v1_swap_proto_rawDesc = "" +
 	"\x14SWAP_STATUS_REJECTED\x10\x02\x12 \n" +
 	"\x1cSWAP_STATUS_AWAITING_PAYMENT\x10\x03\x12\x19\n" +
 	"\x15SWAP_STATUS_COMPLETED\x10\x04\x12\x19\n" +
-	"\x15SWAP_STATUS_CANCELLED\x10\x052\xf6\x01\n" +
-	"\vSwapService\x12>\n" +
-	"\aGetSwap\x12\x1d.taakht.swap.v1.SwapIdRequest\x1a\x14.taakht.swap.v1.Swap\x12J\n" +
-	"\vListMySwaps\x12\x16.google.protobuf.Empty\x1a#.taakht.swap.v1.ListMySwapsResponse\x12[\n" +
-	"\x15SimulateLockerFeePaid\x12,.taakht.swap.v1.SimulateLockerFeePaidRequest\x1a\x14.taakht.swap.v1.SwapBEZ2github.com/taakht/taakht/gen/taakht/swap/v1;swapv1\xaa\x02\x0eTaakht.Swap.V1b\x06proto3"
+	"\x15SWAP_STATUS_CANCELLED\x10\x052\xe4\x02\n" +
+	"\vSwapService\x12[\n" +
+	"\aGetSwap\x12\x1d.taakht.swap.v1.SwapIdRequest\x1a\x14.taakht.swap.v1.Swap\"\x1b\x82\xd3\xe4\x93\x02\x15\x12\x13/v1/swaps/{swap_id}\x12]\n" +
+	"\vListMySwaps\x12\x16.google.protobuf.Empty\x1a#.taakht.swap.v1.ListMySwapsResponse\"\x11\x82\xd3\xe4\x93\x02\v\x12\t/v1/swaps\x12\x98\x01\n" +
+	"\x15SimulateLockerFeePaid\x12,.taakht.swap.v1.SimulateLockerFeePaidRequest\x1a\x14.taakht.swap.v1.Swap\";\x82\xd3\xe4\x93\x025:\x01*\"0/v1/dev/swaps/{swap_id}/locker-fee-paid:simulateBEZ2github.com/taakht/taakht/gen/taakht/swap/v1;swapv1\xaa\x02\x0eTaakht.Swap.V1b\x06proto3"
 
 var (
 	file_taakht_swap_v1_swap_proto_rawDescOnce sync.Once

@@ -7,6 +7,7 @@
 package negotiationv1
 
 import (
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -916,7 +917,7 @@ var File_taakht_negotiation_v1_negotiation_proto protoreflect.FileDescriptor
 
 const file_taakht_negotiation_v1_negotiation_proto_rawDesc = "" +
 	"\n" +
-	"'taakht/negotiation/v1/negotiation.proto\x12\x15taakht.negotiation.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xce\x01\n" +
+	"'taakht/negotiation/v1/negotiation.proto\x12\x15taakht.negotiation.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xce\x01\n" +
 	"\x05Terms\x12:\n" +
 	"\x05leg_a\x18\x01 \x01(\x0e2%.taakht.negotiation.v1.DeliveryMethodR\x04legA\x12:\n" +
 	"\x05leg_b\x18\x02 \x01(\x0e2%.taakht.negotiation.v1.DeliveryMethodR\x04legB\x12)\n" +
@@ -986,16 +987,16 @@ const file_taakht_negotiation_v1_negotiation_proto_rawDesc = "" +
 	"\fApprovalKind\x12\x1d\n" +
 	"\x19APPROVAL_KIND_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10APPROVAL_KIND_AD\x10\x01\x12\x17\n" +
-	"\x13APPROVAL_KIND_TERMS\x10\x022\xbb\x06\n" +
-	"\x12NegotiationService\x12d\n" +
-	"\x0fOpenNegotiation\x12-.taakht.negotiation.v1.OpenNegotiationRequest\x1a\".taakht.negotiation.v1.Negotiation\x12X\n" +
-	"\tApproveAd\x12'.taakht.negotiation.v1.ApproveAdRequest\x1a\".taakht.negotiation.v1.Negotiation\x12b\n" +
-	"\x0eReviseProposal\x12,.taakht.negotiation.v1.ReviseProposalRequest\x1a\".taakht.negotiation.v1.Negotiation\x12`\n" +
-	"\x0fApproveProposal\x12).taakht.negotiation.v1.ProposalRefRequest\x1a\".taakht.negotiation.v1.Negotiation\x12_\n" +
-	"\x0eRejectProposal\x12).taakht.negotiation.v1.ProposalRefRequest\x1a\".taakht.negotiation.v1.Negotiation\x12f\n" +
-	"\x10CloseNegotiation\x12..taakht.negotiation.v1.CloseNegotiationRequest\x1a\".taakht.negotiation.v1.Negotiation\x12a\n" +
-	"\x0eGetNegotiation\x12+.taakht.negotiation.v1.NegotiationIdRequest\x1a\".taakht.negotiation.v1.Negotiation\x12s\n" +
-	"\x10ListNegotiations\x12..taakht.negotiation.v1.ListNegotiationsRequest\x1a/.taakht.negotiation.v1.ListNegotiationsResponseBZZ@github.com/taakht/taakht/gen/taakht/negotiation/v1;negotiationv1\xaa\x02\x15Taakht.Negotiation.V1b\x06proto3"
+	"\x13APPROVAL_KIND_TERMS\x10\x022\xc1\t\n" +
+	"\x12NegotiationService\x12\x81\x01\n" +
+	"\x0fOpenNegotiation\x12-.taakht.negotiation.v1.OpenNegotiationRequest\x1a\".taakht.negotiation.v1.Negotiation\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/negotiations\x12\x91\x01\n" +
+	"\tApproveAd\x12'.taakht.negotiation.v1.ApproveAdRequest\x1a\".taakht.negotiation.v1.Negotiation\"7\x82\xd3\xe4\x93\x021:\x01*\",/v1/negotiations/{negotiation_id}:approve-ad\x12\x97\x01\n" +
+	"\x0eReviseProposal\x12,.taakht.negotiation.v1.ReviseProposalRequest\x1a\".taakht.negotiation.v1.Negotiation\"3\x82\xd3\xe4\x93\x02-:\x01*\"(/v1/negotiations/{negotiation_id}:revise\x12\x9f\x01\n" +
+	"\x0fApproveProposal\x12).taakht.negotiation.v1.ProposalRefRequest\x1a\".taakht.negotiation.v1.Negotiation\"=\x82\xd3\xe4\x93\x027:\x01*\"2/v1/negotiations/{negotiation_id}:approve-proposal\x12\x9d\x01\n" +
+	"\x0eRejectProposal\x12).taakht.negotiation.v1.ProposalRefRequest\x1a\".taakht.negotiation.v1.Negotiation\"<\x82\xd3\xe4\x93\x026:\x01*\"1/v1/negotiations/{negotiation_id}:reject-proposal\x12\x97\x01\n" +
+	"\x10CloseNegotiation\x12..taakht.negotiation.v1.CloseNegotiationRequest\x1a\".taakht.negotiation.v1.Negotiation\"/\x82\xd3\xe4\x93\x02)\"'/v1/negotiations/{negotiation_id}:close\x12\x8c\x01\n" +
+	"\x0eGetNegotiation\x12+.taakht.negotiation.v1.NegotiationIdRequest\x1a\".taakht.negotiation.v1.Negotiation\")\x82\xd3\xe4\x93\x02#\x12!/v1/negotiations/{negotiation_id}\x12\x8d\x01\n" +
+	"\x10ListNegotiations\x12..taakht.negotiation.v1.ListNegotiationsRequest\x1a/.taakht.negotiation.v1.ListNegotiationsResponse\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/v1/negotiationsBZZ@github.com/taakht/taakht/gen/taakht/negotiation/v1;negotiationv1\xaa\x02\x15Taakht.Negotiation.V1b\x06proto3"
 
 var (
 	file_taakht_negotiation_v1_negotiation_proto_rawDescOnce sync.Once

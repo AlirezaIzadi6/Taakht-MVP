@@ -321,6 +321,76 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
     }
 
     [Fact]
+    public async Task SwapCancelledCancelsTheAgreedNegotiationOfThatAdPairAndIsStateChecked()
+    {
+        if (Create() is not { } h)
+        {
+            return;
+        }
+
+        var a = NewAd("user-1");
+        var b = NewAd("user-2");
+        h.SetAll(a, b);
+        var id = (await h.Service.OpenAsync("user-1", a.AdId, b.AdId, default)).Negotiation.Id;
+        await h.Service.ApproveAdAsync("user-2", id, 1, default);
+        await h.Service.ApproveProposalAsync("user-1", id, 1, default);
+        await h.Service.ApproveProposalAsync("user-2", id, 1, default);
+        var cancelled = new Taakht.Swap.V1.SwapCancelled { SwapId = Guid.NewGuid().ToString(), AdAId = a.AdId, AdBId = b.AdId, Reason = "locker fee not paid in time" };
+
+        // Not agreed yet (still waiting for the lock): nothing to cancel.
+        await ApplyCancelledAsync(h, cancelled);
+        Assert.Equal(NegotiationStatus.AgreementPending, (await h.Service.GetAsync("user-1", id, default)).Negotiation.Status);
+
+        await using (var conn = await h.Db.OpenConnectionAsync())
+        await using (var tx = await conn.BeginTransactionAsync())
+        {
+            await h.Events.OnExclusiveLockAsync(conn, tx, new Taakht.Swap.V1.ExclusiveLockAcquired { SwapId = cancelled.SwapId, NegotiationId = id.ToString(), AdAId = a.AdId, AdBId = b.AdId });
+            await tx.CommitAsync();
+        }
+
+        // Reversed ad order and a duplicate delivery are both fine.
+        await ApplyCancelledAsync(h, new Taakht.Swap.V1.SwapCancelled { SwapId = cancelled.SwapId, AdAId = b.AdId, AdBId = a.AdId, Reason = cancelled.Reason });
+        await ApplyCancelledAsync(h, cancelled);
+
+        var n = (await h.Service.GetAsync("user-1", id, default)).Negotiation;
+        Assert.Equal(NegotiationStatus.Cancelled, n.Status);
+        Assert.Equal("locker fee not paid in time", n.CancelReason);
+        var closed = (await h.OutboxAsync(id)).Where(e => e.Type == NegV1.NegotiationClosed.Descriptor.FullName).ToList();
+        Assert.Single(closed);
+
+        // Unknown pair: ignored.
+        await ApplyCancelledAsync(h, new Taakht.Swap.V1.SwapCancelled { SwapId = "x", AdAId = Guid.NewGuid().ToString(), AdBId = a.AdId, Reason = "r" });
+    }
+
+    private static async Task ApplyCancelledAsync(Harness h, Taakht.Swap.V1.SwapCancelled e)
+    {
+        await using var conn = await h.Db.OpenConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        await h.Events.OnSwapCancelledAsync(conn, tx, e);
+        await tx.CommitAsync();
+    }
+
+    [Fact]
+    public async Task AdRefUpsertNeverMovesBackwardsAndHasNoStatusColumn()
+    {
+        if (Create() is not { } h)
+        {
+            return;
+        }
+
+        var ad = NewAd("user-1", 3);
+        await using var conn = await h.Db.OpenConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        await NegotiationRepository.UpsertAdRefAsync(conn, tx, ad, default);
+        await NegotiationRepository.UpsertAdRefAsync(conn, tx, ad with { Version = 2 }, default);
+        await NegotiationRepository.UpsertAdRefAsync(conn, tx, ad with { Version = 3, OwnerId = "someone-else" }, default);
+        Assert.Equal(3, await conn.ExecuteScalarAsync<int>("SELECT current_version FROM ad_ref WHERE ad_id = @id", new { id = ad.AdId }, tx));
+        Assert.Equal("user-1", await conn.ExecuteScalarAsync<string>("SELECT owner_id FROM ad_ref WHERE ad_id = @id", new { id = ad.AdId }, tx));
+        Assert.Equal(0, await conn.ExecuteScalarAsync<int>(
+            "SELECT count(*)::int FROM information_schema.columns WHERE table_name = 'ad_ref' AND column_name = 'status'", transaction: tx));
+    }
+
+    [Fact]
     public async Task GetAndListAreRestrictedToPartiesNewestFirst()
     {
         if (Create() is not { } h)

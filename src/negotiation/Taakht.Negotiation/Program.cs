@@ -43,7 +43,11 @@ builder.Services.AddGrpc(o =>
     o.Interceptors.Add<DomainExceptionInterceptor>();
     o.Interceptors.Add<ServerIdentityInterceptor>();
 });
-builder.Services.AddGrpcReflection();
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddGrpcReflection();
+}
+
 builder.Services.AddHostedService(sp => new EventConsumer(
     sp.GetRequiredService<NpgsqlDataSource>(),
     sp.GetRequiredService<KafkaOptions>(),

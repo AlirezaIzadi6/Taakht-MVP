@@ -3,24 +3,46 @@ package ad
 
 import (
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	adv1 "github.com/taakht/taakht/gen/taakht/ad/v1"
 	"github.com/taakht/taakht/src/ad/internal/eligibility"
 )
 
-const maxTitleLen = 200
+const (
+	maxTitleLen       = 120
+	maxDescriptionLen = 4000
+	maxListEntries    = 20
+	maxEntryLen       = 64
+)
 
-// ValidateSpec checks a spec against the eligibility config. The have side may be partial
-// (empty category), but a given category must be allowed.
+// ValidateSpec checks a spec against the eligibility config and normalizes it in place: the title
+// is trimmed and the want/neighborhood lists are de-duplicated (order kept). The have side may be
+// partial (empty category), but a given category must be allowed.
 func ValidateSpec(spec *adv1.AdSpec, elig *eligibility.Config) error {
 	if spec == nil {
 		return fmt.Errorf("spec is required")
 	}
+	spec.Title = strings.TrimSpace(spec.Title)
 	if spec.Title == "" {
 		return fmt.Errorf("title is required")
 	}
-	if len([]rune(spec.Title)) > maxTitleLen {
+	if utf8.RuneCountInString(spec.Title) > maxTitleLen {
 		return fmt.Errorf("title is longer than %d characters", maxTitleLen)
+	}
+	if utf8.RuneCountInString(spec.Description) > maxDescriptionLen {
+		return fmt.Errorf("description is longer than %d characters", maxDescriptionLen)
+	}
+	var err error
+	if spec.WantCategories, err = normalizeList("want_categories", spec.WantCategories); err != nil {
+		return err
+	}
+	if spec.NeighborhoodIds, err = normalizeList("neighborhood_ids", spec.NeighborhoodIds); err != nil {
+		return err
+	}
+	if len(spec.HaveCategory) > maxEntryLen {
+		return fmt.Errorf("have_category is longer than %d characters", maxEntryLen)
 	}
 	if spec.HaveCategory != "" && !elig.HasCategory(spec.HaveCategory) {
 		return fmt.Errorf("unknown have_category %q", spec.HaveCategory)
@@ -39,6 +61,29 @@ func ValidateSpec(spec *adv1.AdSpec, elig *eligibility.Config) error {
 		return fmt.Errorf("value_estimate must not be negative")
 	}
 	return nil
+}
+
+// normalizeList bounds a string list and removes duplicates while keeping the first occurrence.
+func normalizeList(name string, in []string) ([]string, error) {
+	if len(in) > maxListEntries {
+		return nil, fmt.Errorf("%s has more than %d entries", name, maxListEntries)
+	}
+	if len(in) == 0 {
+		return in, nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if utf8.RuneCountInString(v) > maxEntryLen {
+			return nil, fmt.Errorf("%s entry is longer than %d characters", name, maxEntryLen)
+		}
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out, nil
 }
 
 // HasFilter reports whether the spec narrows the search on the want side.

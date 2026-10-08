@@ -19,7 +19,7 @@ Environment (defaults shown):
 | `GRPC_ADDR` | `:9001` |
 | `ELIGIBILITY_FILE` | `../../config/eligibility.json` |
 
-Migrations in `migrations/` are embedded and applied at startup. gRPC reflection is on (`TAAKHT_GRPC_REFLECTION=off` disables it). Every call needs the `x-user-id` metadata.
+Migrations in `migrations/` are embedded and applied at startup. gRPC reflection is off unless `TAAKHT_GRPC_REFLECTION=on` (scripts/dev.sh sets it). Every call needs the `x-user-id` metadata.
 
 ```bash
 grpcurl -plaintext -H 'x-user-id: user-1' -d '{"spec":{"title":"Book","have_category":"books","want_categories":["tools"]}}' localhost:9001 taakht.ad.v1.AdService/CreateAd
@@ -29,8 +29,10 @@ grpcurl -plaintext -H 'x-user-id: user-1' -d '{"spec":{"title":"Book","have_cate
 
 - New ads are hidden. `EditAd` creates a new version (`ABORTED` on a stale `expected_version`, `FAILED_PRECONDITION` when locked or closed) and always emits `AdEdited` with the full snapshot.
 - `PublishAd` needs a want category or neighborhood and only works from hidden; `HideAd` only from published. Only the owner may edit, publish or hide.
-- `LockAds` locks both ads in one transaction (row locks in id order), requires published or hidden and the agreed version, and is idempotent by `swap_id` via `ad_lock`.
-- Consumes `swap.events` (group `ad`): `SwapCompleted` closes both ads, `SwapCancelled` restores the status held before the lock. Handlers only act on ads the swap still holds locked.
+- `GetAd`: the owner reads any of their ads and versions; callers with a `system:` identity (`system:negotiation`, `system:swap`) read anything; everyone else sees only PUBLISHED ads at the current version (`NOT_FOUND` otherwise, so existence is not leaked).
+- `LockAds` is callable only as `system:swap` (`PERMISSION_DENIED` otherwise). It locks both ads in one transaction (row locks in id order), requires published or hidden and the agreed version, and is idempotent by `swap_id` via `ad_lock`.
+- Spec limits: title trimmed, 1..120 chars; description <= 4000; want/neighborhood lists <= 20 entries of <= 64 chars, de-duplicated. `x-user-id` is at most 64 chars without control characters.
+- Consumes `swap.events` (group `ad`): `SwapCompleted` closes both ads, `SwapCancelled` restores the status held before the lock. Handlers only act on ads the swap still holds locked. An undecodable payload is a permanent failure: logged, recorded as processed and skipped.
 
 ## Tests
 

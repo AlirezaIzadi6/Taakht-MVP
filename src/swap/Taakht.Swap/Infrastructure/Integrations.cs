@@ -31,11 +31,18 @@ public sealed class GrpcAdClient(AdService.AdServiceClient client) : IAdClient
             await client.LockAdsAsync(request, deadline: DateTime.UtcNow + _callTimeout, cancellationToken: ct);
             return new LockOutcome.Locked();
         }
-        catch (RpcException ex) when (ex.StatusCode is StatusCode.FailedPrecondition or StatusCode.NotFound)
+        catch (RpcException ex) when (IsPermanentRejection(ex.StatusCode))
         {
             return new LockOutcome.Rejected(ex.Status.Detail.Length > 0 ? ex.Status.Detail : "ads could not be locked");
         }
     }
+
+    /// <summary>
+    /// Codes that retrying cannot fix: the ads are not lockable (FailedPrecondition, NotFound) or the request itself
+    /// is refused (InvalidArgument, PermissionDenied). Everything else is transient and surfaces for a retry.
+    /// </summary>
+    public static bool IsPermanentRejection(StatusCode code) =>
+        code is StatusCode.FailedPrecondition or StatusCode.NotFound or StatusCode.InvalidArgument or StatusCode.PermissionDenied;
 }
 
 /// <summary>Port to the locker partner (payment status query).</summary>
