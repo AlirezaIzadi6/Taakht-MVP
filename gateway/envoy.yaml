@@ -1,0 +1,85 @@
+# Public API gateway (Envoy): REST/JSON from clients -> gRPC to services.
+#
+# Adding a service (look for the "ADD SERVICE" markers below):
+#   1. Add its .proto (with google.api.http annotations) and rebuild descriptor.binpb.
+#   2. Add the transcoder filter (first service only) / add its fully qualified
+#      name to the transcoder `services` list.
+#   3. Add a route: one path prefix per service.
+#   4. Add a cluster: the service's real address.
+#
+# The transcoder filter is intentionally absent until the first service exists:
+# `proto_descriptor` is required, so the filter needs a real descriptor file
+# (with an empty `services` list the filter is disabled).
+
+admin:
+  address:
+    socket_address: { address: 127.0.0.1, port_value: 9901 }
+
+static_resources:
+  listeners:
+    - name: public
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8080 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: public
+                route_config:
+                  name: public_routes
+                  virtual_hosts:
+                    - name: all
+                      domains: ["*"]
+                      routes:
+                        - match: { path: "/healthz" }
+                          direct_response: { status: 200, body: { inline_string: "ok" } }
+                        - match: { prefix: "/docs/" }
+                          route: { cluster: docs, prefix_rewrite: "/" }
+                        # ADD SERVICE (route), e.g.:
+                        # - match: { prefix: "/v1/users" }
+                        #   route: { cluster: user_service }
+                http_filters:
+                  # ADD SERVICE (transcoder). Put this BEFORE the router filter:
+                  # - name: envoy.filters.http.grpc_json_transcoder
+                  #   typed_config:
+                  #     "@type": type.googleapis.com/envoy.extensions.filters.http.grpc_json_transcoder.v3.GrpcJsonTranscoder
+                  #     proto_descriptor: /etc/envoy/descriptor.binpb
+                  #     services:
+                  #       - taakht.user.v1.UserService
+                  #     auto_mapping: false
+                  #     # Required: without it the route is re-matched on the rewritten
+                  #     # /pkg.Service/Method path and every transcoded call returns 404.
+                  #     match_incoming_request_route: true
+                  #     ignore_unknown_query_parameters: true
+                  #     convert_grpc_status: true
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    # Static docs site (Scalar + openapi.yaml).
+    - name: docs
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: docs
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: docs, port_value: 80 }
+
+    # ADD SERVICE (cluster), e.g.:
+    # - name: user_service
+    #   type: STRICT_DNS
+    #   typed_extension_protocol_options:
+    #     envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+    #       "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+    #       explicit_http_config: { http2_protocol_options: {} }   # gRPC requires HTTP/2
+    #   load_assignment:
+    #     cluster_name: user_service
+    #     endpoints:
+    #       - lb_endpoints:
+    #           - endpoint:
+    #               address:
+    #                 socket_address: { address: user-service, port_value: 9090 }

@@ -1,0 +1,63 @@
+# ---------- .NET ----------
+[Bb]in/
+[Oo]bj/
+publish/
+artifacts/
+*.user
+*.suo
+*.nupkg
+*.snupkg
+.vs/
+TestResults/
+*.trx
+coverage*.xml
+coverage*.json
+*.coverage
+*.coveragexml
+BenchmarkDotNet.Artifacts/
+launchSettings.local.json
+
+# ---------- Go ----------
+*.exe
+*.test
+*.out
+*.prof
+coverage.txt
+coverage.html
+# go.work and go.work.sum are committed on purpose (multi-module monorepo)
+
+# ---------- IDE / editor ----------
+.idea/
+*.swp
+*.swo
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- Secrets / local config ----------
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.local.json
+secrets.json
+*.pfx
+*.key
+*.pem
+
+# ---------- Local tooling ----------
+lefthook-local.yml
+.claude/settings.local.json
+.claude/worktrees/
+
+# ---------- Logs / temp ----------
+*.log
+logs/
+tmp/

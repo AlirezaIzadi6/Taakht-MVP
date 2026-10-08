@@ -1,0 +1,34 @@
+# Install: `lefthook install` (once per clone).
+# Hooks AUTO-FIX what is mechanically fixable and re-stage it (stage_fixed); whatever is left fails the commit.
+# CI re-checks everything without fixing and remains the source of truth.
+pre-commit:
+  parallel: false # Go commands rewrite the same files, so they must run in order
+  commands:
+    # Folder mode needs no solution file, which matters because every .NET service has its own solution.
+    # Style fixes (usings, braces, var, ...) need a loaded project: run `make fmt` or rely on IDE format-on-save; CI verifies.
+    1-dotnet-whitespace:
+      glob: "*.{cs,csproj,props}"
+      run: dotnet format whitespace . --folder --include {staged_files}
+      stage_fixed: true
+    # Go has one module per service; golangci-lint must run inside each module, not at the repo root.
+    2-go-format:
+      glob: "*.go"
+      run: |
+        for m in $(git ls-files -- '*go.mod' | xargs -n1 dirname); do
+          (cd "$m" && golangci-lint fmt ./...) || exit 1
+        done
+      stage_fixed: true
+    3-go-lint:
+      glob: "*.go"
+      run: |
+        for m in $(git ls-files -- '*go.mod' | xargs -n1 dirname); do
+          (cd "$m" && golangci-lint run --fix --new-from-rev=HEAD ./...) || exit 1
+        done
+      stage_fixed: true
+
+commit-msg:
+  commands:
+    conventional-commit:
+      run: >-
+        grep -qE '^(feat|fix|docs|refactor|test|chore|perf|build|ci)(\([a-z0-9-]+\))?!?: .+' {1}
+        || (echo "Commit message must follow Conventional Commits, e.g. 'feat(reputation): add score projection'" && exit 1)

@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # Decide which parts of the monorepo changed so unrelated stacks are skipped.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      dotnet: ${{ steps.filter.outputs.dotnet }}
+      go: ${{ steps.filter.outputs.go }}
+      dotnet-solutions: ${{ steps.solutions.outputs.list }}
+      go-modules: ${{ steps.modules.outputs.list }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            dotnet:
+              - '**/*.cs'
+              - '**/*.csproj'
+              - '**/*.props'
+              - '**/*.targets'
+              - '**/*.sln'
+              - '**/*.slnx'
+              - 'global.json'
+              - '.editorconfig'
+              - '.github/workflows/ci.yml'
+            go:
+              - '**/*.go'
+              - '**/go.mod'
+              - '**/go.sum'
+              - 'go.work'
+              - '.golangci.yml'
+              - '.github/workflows/ci.yml'
+
+      # Every solution file (one per .NET service) becomes one matrix entry.
+      - id: solutions
+        run: |
+          list=$(find . \( -name '*.sln' -o -name '*.slnx' \) -not -path '*/node_modules/*' | sort | jq -R -s -c 'split("\n")[:-1]')
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+
+      # Every directory holding a go.mod becomes one matrix entry.
+      - id: modules
+        run: |
+          list=$(find . -name go.mod -not -path '*/node_modules/*' -exec dirname {} \; | sort | jq -R -s -c 'split("\n")[:-1]')
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      # Squash-merge uses the PR title as the commit message, so enforce Conventional Commits here.
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dotnet:
+    needs: changes
+    if: needs.changes.outputs.dotnet == 'true' && needs.changes.outputs.dotnet-solutions != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        solution: ${{ fromJson(needs.changes.outputs.dotnet-solutions) }}
+    env:
+      SOLUTION: ${{ matrix.solution }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - run: dotnet restore "$SOLUTION"
+
+      - name: Format check
+        run: dotnet format "$SOLUTION" --verify-no-changes --no-restore
+
+      - name: Build (analyzers + warnings as errors)
+        run: dotnet build "$SOLUTION" -c Release --no-restore
+
+      - name: Test
+        run: dotnet test "$SOLUTION" -c Release --no-build
+
+  go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go-modules != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJson(needs.changes.outputs.go-modules) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest # pin to a specific v2.x once the team settles on one
+          working-directory: ${{ matrix.module }}
+          args: --config ${{ github.workspace }}/.golangci.yml
+
+      - name: Test
+        working-directory: ${{ matrix.module }}
+        run: go test -race ./...
+
+  # Single required status check for branch protection: skipped jobs count as OK, failed/cancelled ones don't.
+  ci-ok:
+    if: always()
+    needs: [pr-title, dotnet, go]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify results
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required jobs failed"; exit 1
+          fi

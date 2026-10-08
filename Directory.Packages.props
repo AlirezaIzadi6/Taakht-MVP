@@ -1,0 +1,13 @@
+<Project>
+
+  <!-- Central Package Management: versions live ONLY here; csproj files use <PackageReference Include="X" /> without Version. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- <PackageVersion Include="..." Version="..." /> -->
+  </ItemGroup>
+
+</Project>
