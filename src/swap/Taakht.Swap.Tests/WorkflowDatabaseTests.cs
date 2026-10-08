@@ -1,0 +1,295 @@
+using Dapper;
+using Grpc.Core;
+using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
+using Taakht.Common.V1;
+using Taakht.Negotiation.V1;
+using Taakht.Platform;
+using Taakht.Swap.Application;
+using Taakht.Swap.Domain;
+using Taakht.Swap.Infrastructure;
+using DomainDelivery = Taakht.Swap.Domain.DeliveryMethod;
+using PbDelivery = Taakht.Negotiation.V1.DeliveryMethod;
+
+namespace Taakht.Swap.Tests;
+
+/// <summary>Runs only when TEST_DATABASE_URL points at a Postgres server where databases can be created.</summary>
+public sealed class DbFactAttribute : FactAttribute
+{
+    public DbFactAttribute()
+    {
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TEST_DATABASE_URL")))
+        {
+            Skip = "TEST_DATABASE_URL is not set";
+        }
+    }
+}
+
+public sealed class TestDatabase : IAsyncLifetime
+{
+    private readonly string _name = $"swap_test_{Guid.NewGuid():N}";
+    private string _adminConnectionString = "";
+
+    public NpgsqlDataSource DataSource { get; private set; } = null!;
+
+    public async Task InitializeAsync()
+    {
+        var url = Environment.GetEnvironmentVariable("TEST_DATABASE_URL");
+        if (string.IsNullOrEmpty(url))
+        {
+            return;
+        }
+
+        _adminConnectionString = DatabaseUrl.ToConnectionString(url);
+        await using (var admin = new NpgsqlConnection(_adminConnectionString))
+        {
+            await admin.ExecuteAsync($"CREATE DATABASE {_name}");
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder(_adminConnectionString) { Database = _name };
+        DataSource = NpgsqlDataSource.Create(builder.ConnectionString);
+        await Migrator.MigrateAsync(DataSource, typeof(SwapWorkflow).Assembly);
+    }
+
+    public async Task DisposeAsync()
+    {
+        if (DataSource is null)
+        {
+            return;
+        }
+
+        await DataSource.DisposeAsync();
+        NpgsqlConnection.ClearAllPools();
+        await using var admin = new NpgsqlConnection(_adminConnectionString);
+        await admin.ExecuteAsync($"DROP DATABASE IF EXISTS {_name} WITH (FORCE)");
+    }
+}
+
+public sealed class FakeAdClient : IAdClient
+{
+    private readonly Queue<Func<LockOutcome>> _script = new();
+
+    public List<Guid> Calls { get; } = [];
+
+    public FakeAdClient Then(Func<LockOutcome> step)
+    {
+        _script.Enqueue(step);
+        return this;
+    }
+
+    public Task<LockOutcome> LockAdsAsync(Guid swapId, IReadOnlyList<AdVersionRef> ads, CancellationToken ct)
+    {
+        Calls.Add(swapId);
+        return Task.FromResult(_script.Count > 0 ? _script.Dequeue()() : new LockOutcome.Locked());
+    }
+}
+
+public sealed class FakeClock(DateTimeOffset start) : TimeProvider
+{
+    private DateTimeOffset _now = start;
+
+    public void Advance(TimeSpan by) => _now += by;
+
+    public override DateTimeOffset GetUtcNow() => _now;
+}
+
+public class WorkflowDatabaseTests(TestDatabase db) : IClassFixture<TestDatabase>
+{
+    private static readonly TimeSpan _window = TimeSpan.FromMinutes(2);
+
+    private static AgreementReached Agreement(string negotiationId, PbDelivery legA = PbDelivery.Locker, PbDelivery legB = PbDelivery.Locker) => new()
+    {
+        NegotiationId = negotiationId,
+        AdA = new AgreedAd { AdId = $"ad-a-{negotiationId}", OwnerId = "user-1", Version = 3 },
+        AdB = new AgreedAd { AdId = $"ad-b-{negotiationId}", OwnerId = "user-2", Version = 5 },
+        Terms = new Terms { LegA = legA, LegB = legB },
+    };
+
+    private (SwapWorkflow Workflow, SwapStore Store, FakeClock Clock) Build(FakeAdClient ads)
+    {
+        var store = new SwapStore(db.DataSource);
+        var clock = new FakeClock(DateTimeOffset.UtcNow);
+        var workflow = new SwapWorkflow(
+            store, ads, new MockDeliveryProvider(store), new SwapOptions(_window), clock, NullLogger<SwapWorkflow>.Instance);
+        return (workflow, store, clock);
+    }
+
+    private async Task<List<string>> OutboxTypesAsync(Guid swapId)
+    {
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        var rows = await conn.QueryAsync<byte[]>("SELECT envelope FROM outbox WHERE key = @k ORDER BY created_at, id", new { k = swapId.ToString() });
+        return [.. rows.Select(r => Envelope.Parser.ParseFrom(r).Type)];
+    }
+
+    private async Task<SwapModel> SwapOfAsync(SwapStore store, string negotiationId)
+    {
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        var id = await conn.QuerySingleAsync<Guid>("SELECT id FROM swap WHERE negotiation_id = @n", new { n = negotiationId });
+        return (await store.GetAsync(id, CancellationToken.None))!;
+    }
+
+    [DbFact]
+    public async Task Duplicate_agreement_creates_one_swap_and_locks_once()
+    {
+        var ads = new FakeAdClient();
+        var (workflow, store, _) = Build(ads);
+        var msg = Agreement("neg-dup");
+
+        await workflow.HandleAgreementReachedAsync(msg, CancellationToken.None);
+        await workflow.HandleAgreementReachedAsync(msg, CancellationToken.None);
+
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        Assert.Equal(1, await conn.QuerySingleAsync<int>("SELECT count(*) FROM swap WHERE negotiation_id = 'neg-dup'"));
+        var swap = await SwapOfAsync(store, "neg-dup");
+        Assert.Equal(SwapStatus.AwaitingPayment, swap.Status);
+        Assert.NotNull(swap.PaymentDeadline);
+        Assert.Single(ads.Calls);
+        Assert.Equal(["taakht.swap.v1.ExclusiveLockAcquired"], await OutboxTypesAsync(swap.Id));
+    }
+
+    [DbFact]
+    public async Task Rejected_lock_marks_swap_rejected_and_emits_event()
+    {
+        var ads = new FakeAdClient().Then(() => new LockOutcome.Rejected("ad version changed"));
+        var (workflow, store, _) = Build(ads);
+
+        await workflow.HandleAgreementReachedAsync(Agreement("neg-rej"), CancellationToken.None);
+
+        var swap = await SwapOfAsync(store, "neg-rej");
+        Assert.Equal(SwapStatus.Rejected, swap.Status);
+        Assert.Equal("ad version changed", swap.CancelReason);
+        Assert.Equal(["taakht.swap.v1.SwapRejected"], await OutboxTypesAsync(swap.Id));
+    }
+
+    [DbFact]
+    public async Task Retry_after_transient_failure_succeeds_without_duplicating_the_swap()
+    {
+        var ads = new FakeAdClient()
+            .Then(() => throw new RpcException(new Status(StatusCode.Unavailable, "ad down")));
+        var (workflow, store, _) = Build(ads);
+        var msg = Agreement("neg-retry");
+
+        await Assert.ThrowsAsync<RpcException>(() => workflow.HandleAgreementReachedAsync(msg, CancellationToken.None));
+        Assert.Equal(SwapStatus.Locking, (await SwapOfAsync(store, "neg-retry")).Status);
+
+        await workflow.HandleAgreementReachedAsync(msg, CancellationToken.None);
+
+        var swap = await SwapOfAsync(store, "neg-retry");
+        Assert.Equal(SwapStatus.AwaitingPayment, swap.Status);
+        Assert.Equal(2, ads.Calls.Count);
+        Assert.Equal(ads.Calls[0], ads.Calls[1]);
+        Assert.Equal(["taakht.swap.v1.ExclusiveLockAcquired"], await OutboxTypesAsync(swap.Id));
+    }
+
+    [DbFact]
+    public async Task Agreement_without_locker_legs_completes_immediately()
+    {
+        var (workflow, store, _) = Build(new FakeAdClient());
+
+        await workflow.HandleAgreementReachedAsync(Agreement("neg-nolocker", PbDelivery.InPerson, PbDelivery.InPerson), CancellationToken.None);
+
+        var swap = await SwapOfAsync(store, "neg-nolocker");
+        Assert.Equal(SwapStatus.Completed, swap.Status);
+        Assert.Equal(
+            ["taakht.swap.v1.ExclusiveLockAcquired", "taakht.swap.v1.SwapCompleted"],
+            await OutboxTypesAsync(swap.Id));
+    }
+
+    [DbFact]
+    public async Task Fee_payments_complete_the_swap_and_replays_are_idempotent()
+    {
+        var (workflow, store, _) = Build(new FakeAdClient());
+        await workflow.HandleAgreementReachedAsync(Agreement("neg-pay"), CancellationToken.None);
+        var swap = await SwapOfAsync(store, "neg-pay");
+
+        var afterFirst = await workflow.RecordFeePaidAsync(swap.Id, "user-1", CancellationToken.None);
+        await workflow.RecordFeePaidAsync(swap.Id, "user-1", CancellationToken.None);
+        Assert.Equal(SwapStatus.AwaitingPayment, afterFirst.Status);
+
+        var done = await workflow.RecordFeePaidAsync(swap.Id, "user-2", CancellationToken.None);
+        await workflow.RecordFeePaidAsync(swap.Id, "user-2", CancellationToken.None);
+
+        Assert.Equal(SwapStatus.Completed, done.Status);
+        Assert.Equal(
+            ["taakht.swap.v1.ExclusiveLockAcquired", "taakht.swap.v1.SwapCompleted"],
+            await OutboxTypesAsync(swap.Id));
+    }
+
+    [DbFact]
+    public async Task Fee_paid_by_a_stranger_is_a_failed_precondition()
+    {
+        var (workflow, store, _) = Build(new FakeAdClient());
+        await workflow.HandleAgreementReachedAsync(Agreement("neg-stranger"), CancellationToken.None);
+        var swap = await SwapOfAsync(store, "neg-stranger");
+
+        await Assert.ThrowsAsync<SwapDomainException>(() => workflow.RecordFeePaidAsync(swap.Id, "user-9", CancellationToken.None));
+    }
+
+    [DbFact]
+    public async Task Sweeper_cancels_unpaid_swap_after_deadline_and_blames_first_unpaid_leg()
+    {
+        var (workflow, store, clock) = Build(new FakeAdClient());
+        await workflow.HandleAgreementReachedAsync(Agreement("neg-timeout"), CancellationToken.None);
+        var swap = await SwapOfAsync(store, "neg-timeout");
+        await workflow.RecordFeePaidAsync(swap.Id, "user-1", CancellationToken.None);
+
+        Assert.Equal(0, await workflow.SweepOverdueAsync(CancellationToken.None));
+        clock.Advance(_window + TimeSpan.FromSeconds(1));
+        Assert.True(await workflow.SweepOverdueAsync(CancellationToken.None) >= 1);
+
+        var cancelled = await SwapOfAsync(store, "neg-timeout");
+        Assert.Equal(SwapStatus.Cancelled, cancelled.Status);
+        Assert.Equal("locker fee not paid in time", cancelled.CancelReason);
+        Assert.Equal(
+            ["taakht.swap.v1.ExclusiveLockAcquired", "taakht.swap.v1.SwapCancelled"],
+            await OutboxTypesAsync(swap.Id));
+        await Assert.ThrowsAsync<SwapDomainException>(() => workflow.RecordFeePaidAsync(swap.Id, "user-2", CancellationToken.None));
+    }
+
+    [DbFact]
+    public async Task Payment_racing_the_sweeper_yields_exactly_one_terminal_event()
+    {
+        var (workflow, store, clock) = Build(new FakeAdClient());
+        for (var i = 0; i < 10; i++)
+        {
+            var negotiationId = $"neg-race-{i}";
+            await workflow.HandleAgreementReachedAsync(Agreement(negotiationId, PbDelivery.Locker, PbDelivery.InPerson), CancellationToken.None);
+            var swap = await SwapOfAsync(store, negotiationId);
+            clock.Advance(_window + TimeSpan.FromSeconds(1));
+
+            var pay = Task.Run(async () =>
+            {
+                try
+                {
+                    await workflow.RecordFeePaidAsync(swap.Id, "user-1", CancellationToken.None);
+                }
+                catch (SwapDomainException)
+                {
+                    // The sweeper won.
+                }
+            });
+            var sweep = Task.Run(() => workflow.SweepOverdueAsync(CancellationToken.None));
+            await Task.WhenAll(pay, sweep);
+
+            var final = await SwapOfAsync(store, negotiationId);
+            var terminal = (await OutboxTypesAsync(swap.Id))
+                .Count(t => t is "taakht.swap.v1.SwapCompleted" or "taakht.swap.v1.SwapCancelled");
+            Assert.Contains(final.Status, new[] { SwapStatus.Completed, SwapStatus.Cancelled });
+            Assert.Equal(1, terminal);
+        }
+    }
+
+    [DbFact]
+    public async Task Only_parties_see_a_swap_in_listings()
+    {
+        var (workflow, store, _) = Build(new FakeAdClient());
+        await workflow.HandleAgreementReachedAsync(Agreement("neg-list"), CancellationToken.None);
+        var swap = await SwapOfAsync(store, "neg-list");
+
+        Assert.Contains(await store.ListForUserAsync("user-1", CancellationToken.None), s => s.Id == swap.Id);
+        Assert.Contains(await store.ListForUserAsync("user-2", CancellationToken.None), s => s.Id == swap.Id);
+        Assert.DoesNotContain(await store.ListForUserAsync("user-3", CancellationToken.None), s => s.Id == swap.Id);
+        Assert.False(swap.IsParty("user-3"));
+        Assert.Equal(DomainDelivery.Locker, swap.LegA.Method);
+    }
+}

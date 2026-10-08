@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Taakht.Negotiation/Taakht.Negotiation.csproj" />
+  <Project Path="Taakht.Negotiation.Tests/Taakht.Negotiation.Tests.csproj" />
+</Solution>

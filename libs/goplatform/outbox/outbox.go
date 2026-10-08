@@ -37,7 +37,7 @@ func Add(ctx context.Context, tx pgx.Tx, topic, key string, msg proto.Message) e
 		return fmt.Errorf("outbox: marshal envelope: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO outbox (id, topic, key, envelope) VALUES ($1, $2, $3, $4)`,
+		`INSERT INTO outbox (id, topic, key, envelope, created_at) VALUES ($1, $2, $3, $4, clock_timestamp())`,
 		id, topic, key, raw); err != nil {
 		return fmt.Errorf("outbox: insert: %w", err)
 	}

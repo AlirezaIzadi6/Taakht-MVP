@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Taakht.Swap/Taakht.Swap.csproj" />
+  <Project Path="Taakht.Swap.Tests/Taakht.Swap.Tests.csproj" />
+</Solution>

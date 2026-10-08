@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Taakht.Swap</RootNamespace>
+    <InternalsVisibleTo>Taakht.Swap.Tests</InternalsVisibleTo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
+    <PackageReference Include="Grpc.Net.ClientFactory" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../libs/dotnet/Taakht.Platform/Taakht.Platform.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="../../../api/proto/taakht/negotiation/v1/negotiation.proto" ProtoRoot="../../../api/proto" GrpcServices="None" Link="Protos/negotiation.proto" />
+    <Protobuf Include="../../../api/proto/taakht/negotiation/v1/events.proto" ProtoRoot="../../../api/proto" GrpcServices="None" Link="Protos/negotiation_events.proto" />
+    <Protobuf Include="../../../api/proto/taakht/ad/v1/ad.proto" ProtoRoot="../../../api/proto" GrpcServices="Client" Link="Protos/ad.proto" />
+    <Protobuf Include="../../../api/proto/taakht/swap/v1/swap.proto" ProtoRoot="../../../api/proto" GrpcServices="Server" Link="Protos/swap.proto" />
+    <Protobuf Include="../../../api/proto/taakht/swap/v1/events.proto" ProtoRoot="../../../api/proto" GrpcServices="None" Link="Protos/swap_events.proto" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="migrations/*.sql" />
+  </ItemGroup>
+
+</Project>

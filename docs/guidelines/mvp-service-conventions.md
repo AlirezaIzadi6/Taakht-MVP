@@ -63,7 +63,7 @@ CREATE TABLE outbox (
 CREATE INDEX outbox_unpublished ON outbox (created_at) WHERE published_at IS NULL;
 ```
 
-A relay loop (poll every ~200 ms) reads unpublished rows in `created_at` order with `FOR UPDATE SKIP LOCKED`, produces to Kafka, waits for the ack, then sets `published_at`. Delivery is at-least-once.
+A relay loop (poll every ~200 ms) reads unpublished rows in `created_at` order with `FOR UPDATE SKIP LOCKED`, produces to Kafka, waits for the ack, then sets `published_at`. Delivery is at-least-once. Insert with `created_at = clock_timestamp()` (not the `now()` default, which is the transaction start and would leave events of one transaction unordered).
 
 **Idempotent consumers** (every consuming service has this table; the dedupe insert and the handler's writes share one transaction, and the offset is committed after the transaction):
 

@@ -33,7 +33,7 @@ public static class Outbox
 
         var envelope = Wrap(key, message);
         await using var cmd = new NpgsqlCommand(
-            "INSERT INTO outbox (id, topic, key, envelope) VALUES (@id, @topic, @key, @env)", connection, transaction);
+            "INSERT INTO outbox (id, topic, key, envelope, created_at) VALUES (@id, @topic, @key, @env, clock_timestamp())", connection, transaction);
         cmd.Parameters.AddWithValue("id", Guid.Parse(envelope.EventId));
         cmd.Parameters.AddWithValue("topic", topic);
         cmd.Parameters.AddWithValue("key", key);

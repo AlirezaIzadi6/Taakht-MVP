@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Taakht.Negotiation": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
