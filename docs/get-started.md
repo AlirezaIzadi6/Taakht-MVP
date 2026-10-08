@@ -69,6 +69,9 @@ To skip the hooks for one commit, use `git commit --no-verify`. CI runs the same
 - The .NET job runs once per solution, discovered from the `*.sln`/`*.slnx` files: restore, format check, Release build (analyzers run as errors) and tests.
 - The Go job runs once per module, discovered from the `go.mod` files: `golangci-lint` and `go test -race`.
 - If any .NET or Go file or shared config changes, all solutions or modules of that stack run. Narrowing this to affected services only is a possible later optimization.
+- The .NET and Go test jobs get a Postgres 17 service container; a single-node Kafka (`apache/kafka:3.9.0`) is started for the modules that use it (`libs/goplatform`, `src/ad`, `src/matching`, `libs/dotnet`). `TEST_DATABASE_URL` and `KAFKA_BROKERS` are set for the test step, so the DB- and Kafka-backed lock/concurrency tests run in CI instead of skipping.
+- A separate `e2e` job runs on pushes to `main` and on pull requests touching `src/`, `libs/`, `api/`, `tests/`, `config/` or `deploy/`: it starts Postgres, Kafka and the four services, then runs `tests/e2e` with `E2E=1`. Service logs are printed and uploaded on failure.
+- `e2e` is informational (`continue-on-error`) and is not part of `ci-ok`, so a red e2e run does not block merging.
 - Pull request titles must follow Conventional Commits, because squash merge uses the title as the commit message.
 - `ci-ok` is the single required status check for branch protection.
 

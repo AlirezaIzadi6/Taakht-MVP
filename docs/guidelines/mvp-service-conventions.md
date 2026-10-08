@@ -26,13 +26,16 @@ Services run on the host (`go run`, `dotnet run`), not in containers, during the
 | negotiation | 9003 | `negotiation` |
 | swap | 9004 | `swap` |
 
+gRPC reflection is off unless `TAAKHT_GRPC_REFLECTION=on` (Go) or the Development environment (.NET); `scripts/dev.sh` turns it on. Dev-only RPCs need `ENABLE_DEV_ENDPOINTS=true` or Development.
+
 Environment variables (with these defaults for local runs): `DATABASE_URL=postgres://taakht:taakht@localhost:5432/<db>?sslmode=disable` (the .NET services convert it to a connection string or use `ConnectionStrings__Default`), `KAFKA_BROKERS=localhost:9094`, `GRPC_ADDR=:<port>`, `AD_ADDR=localhost:9001`, `ELIGIBILITY_FILE=../../config/eligibility.json` (resolve relative to the working directory; also accept an absolute path). Swap only: `PAYMENT_DEADLINE=2m` (a Go-style duration for readability; parse `1h`, `2m`, `30s`).
 
 ## Identity
 
 - The caller is the gRPC metadata key `x-user-id`. A shared interceptor reads it; a missing value is `UNAUTHENTICATED`.
-- Outgoing service-to-service calls forward the same `x-user-id`.
-- Seed users: `user-1` .. `user-4`. Envoy will set the header from a JWT later; services never validate tokens.
+- A valid id has 1..64 characters and no control characters; otherwise `UNAUTHENTICATED`.
+- Outgoing service-to-service calls forward the same `x-user-id`, except calls made on behalf of the system: Swap calls `LockAds` as `system:swap` and Negotiation calls `GetAd` as `system:negotiation`. The prefix `system:` is reserved; real user ids must never start with it (see [API conventions](api-conventions.md)).
+- Seed users: `user-1` .. `user-4`. Envoy sets the header from the JWT `sub`; services never validate tokens.
 
 ## Errors (gRPC status codes)
 
@@ -76,7 +79,7 @@ CREATE TABLE processed_events (
 );
 ```
 
-If `INSERT ... ON CONFLICT DO NOTHING` inserts nothing, the event was already handled: skip. A handler that fails returns an error; the message is retried (log + retry with backoff; no DLQ in the MVP). Handlers must also be safe against re-ordering across topics (check state, not just event arrival).
+If `INSERT ... ON CONFLICT DO NOTHING` inserts nothing, the event was already handled: skip. A handler that fails returns an error; the message is retried (log + retry with backoff; no DLQ in the MVP). An error that retrying cannot fix is wrapped as permanent (`consume.Permanent` in Go, `PermanentEventException` in .NET; decode failures are permanent automatically): the event is logged, recorded in `processed_events` and skipped. Handlers must also be safe against re-ordering across topics (check state, not just event arrival).
 
 Consumer groups are named after the service (`ad`, `matching`, `negotiation`, `swap`); start from the earliest offset.
 

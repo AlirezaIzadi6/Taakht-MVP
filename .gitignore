@@ -65,3 +65,6 @@ tmp/
 # MVP local run artifacts
 .env
 *.log
+
+# Local dev runtime (scripts/dev.sh): binaries, pids, logs
+.run/

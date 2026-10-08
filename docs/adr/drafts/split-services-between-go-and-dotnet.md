@@ -11,11 +11,13 @@ The README names Go 1.27 (high-load services) and .NET 10 (the rest). Two people
 
 ## Decision
 
-We will use Go for services whose main work is concurrency and throughput, and .NET for services whose main work is rich domain state. Working assignment: Go for Matching and Ad, .NET for Deal (negotiation and settlement) and Reputation. Services share only the Protobuf contracts in `api/`, never code (see the monorepo ADR).
+We will use Go for services whose main work is concurrency and throughput, and .NET for services whose main work is rich domain state. Working assignment: Go for Matching and Ad, .NET for Negotiation and Swap (Reputation, also planned for .NET, is not built).
+
+MVP note (2026-10-08): the MVP implements exactly this split with four services: Ad and Matching in Go, Negotiation and Swap in .NET 10. The .NET 10 toolchain gap listed below no longer applies to the build, but there is still no benchmark behind the workload argument. Services share only the Protobuf contracts in `api/`, never code (see the monorepo ADR).
 
 ## Options considered
 
-1. **Split by workload (chosen)** - Matching (scanning and scoring candidates, geo queries) and Ad (the contended exclusive reservation) are concurrency-heavy; Deal (versioned proposals, approvals, obligations) and Reputation (event-sourced projections) are dominated by state machines and domain rules. Each person owns two services. Cost: two toolchains, two CI stacks, and common infrastructure code (interceptors, clients) written twice.
+1. **Split by workload (chosen)** - Matching (scanning and scoring candidates, geo queries) and Ad (the contended exclusive reservation) are concurrency-heavy; Negotiation (versioned proposals, approvals) and Swap (a state machine with deadlines), and later Reputation (event-sourced projections), are dominated by state machines and domain rules. Each person owns two services. Cost: two toolchains, two CI stacks, and common infrastructure code (interceptors, clients) written twice.
 2. **Everything in .NET** - one stack, simplest to run and review, but gives up the second language the team wants to learn and the README's Go choice for high-load services.
 3. **Everything in Go** - one stack, but the same trade-off in the other direction and a weaker fit for state-machine-heavy domain code.
 4. **Choose per service by preference, with no stated rule** - maximum freedom, but the reasoning would be invisible to a reader.
@@ -29,7 +31,7 @@ We will use Go for services whose main work is concurrency and throughput, and .
 ## Known gaps
 
 - No benchmark shows that Go beats .NET for Matching or Ad. Correctness of the exclusive lock does not depend on the language (it rests on database constraints); the split rests on workload fit and on the learning goal.
-- The .NET 10 toolchain is unverified: the development machine had only SDK 8 and 9 and `global.json` asks for 10.0.400; the official SDK 10 image failed in a test (see the contract evidence).
+- The .NET 10 toolchain is unverified: the development machine had only SDK 8 and 9 and `global.json` asks for 10.0.400; the official SDK 10 image failed in a test (see the contract evidence). MVP note: a .NET 10 SDK is now installed and `Taakht.Platform.Tests` ran on `net10.0` on 2026-10-08.
 
 ## Evidence
 

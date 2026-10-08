@@ -63,3 +63,17 @@ Decisions that are not yet recorded as ADRs, in the order we work through them. 
 | Media storage | Not in the README scope yet; add an item if images become part of it |
 | Load and stress test tooling | Testing docs |
 | Commit, PR and CI conventions | Process docs |
+
+## Resolved or narrowed by the MVP build
+
+The one-week MVP ([plan](product/mvp-plan.md), [architecture as built](architecture/mvp-architecture.md)) answered or narrowed these items in code. The ADRs below are drafts (status Proposed); the items stay in the table above until an ADR is accepted.
+
+| Item | What the MVP answered | Left open | Where |
+|---|---|---|---|
+| 3 Service decomposition | Four services were built: Ad, Matching (Go), Negotiation, Swap (.NET). Negotiation and settlement are separate services; Reputation and Communication are not built | Confirmation against the context map; whether Negotiation and Swap should merge | [keep-negotiation-and-swap-as-separate-services](adr/drafts/keep-negotiation-and-swap-as-separate-services.md) |
+| 9 Transactional outbox | Outbox table written in the business transaction plus a polling relay per service; at-least-once; `clock_timestamp()` keeps the order of events within a transaction | CDC (Debezium), pruning, several relay instances | [use-a-transactional-outbox-for-events](adr/drafts/use-a-transactional-outbox-for-events.md) |
+| 10 Consistency and workflows | The exclusive lock is claimed in the Ad service in one transaction, idempotent by `swap_id`, driven by a saga in Swap. Consumers are idempotent through a processed-events table plus state checks | Timeouts and repair for a negotiation stuck in `AGREEMENT_PENDING`; DLQ | [take-the-exclusive-ad-lock-in-the-ad-service](adr/drafts/take-the-exclusive-ad-lock-in-the-ad-service.md), [make-consumers-idempotent-with-a-processed-events-table](adr/drafts/make-consumers-idempotent-with-a-processed-events-table.md) |
+| Approval validity | Approvals are bound to ad versions and Proposal numbers; staleness is computed by comparison; the final approval re-checks versions synchronously with Ad, and `LockAds` is the authority | Showing staleness in the REST contract | [bind-approvals-to-versions](adr/drafts/bind-approvals-to-versions.md) |
+| Consistency between lock and index (part of 10, 11) | Eventual, through events: Matching removes an ad when `AdLocked` arrives and re-adds it on `AdReleased`. Negotiation keeps a local copy of ad versions (`ad_ref`) fed by events and refreshed by synchronous `GetAd` | A locked ad can briefly appear in search results; the effect is only a refused request later | [MVP architecture](architecture/mvp-architecture.md) |
+| 14 Search (partly) | For the MVP, search is plain SQL on a Postgres read model in Matching, scored in Go; no Elasticsearch | Whether Elasticsearch is needed at scale (not measured) | [MVP architecture](architecture/mvp-architecture.md), "Differences from the full design" |
+| 11 Data ownership (partly) | Each service owns its database; copies are event-fed read models (`ad_index`, `ad_ref`) | Matching's copy of Reputation (no Reputation service yet) | [MVP architecture](architecture/mvp-architecture.md), "Data ownership" |

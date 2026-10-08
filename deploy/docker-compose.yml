@@ -40,5 +40,17 @@ services:
       timeout: 10s
       retries: 20
 
+  envoy:
+    image: envoyproxy/envoy:v1.34-latest
+    command: ["-c", "/etc/envoy/envoy.yaml"]
+    volumes:
+      - ../gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ../gateway/descriptor.binpb:/etc/envoy/descriptor.binpb:ro
+    ports:
+      - "8080:8080"
+      - "127.0.0.1:9901:9901"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   pgdata:

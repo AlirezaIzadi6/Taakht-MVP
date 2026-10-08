@@ -1,19 +1,19 @@
-# Public API gateway (Envoy): REST/JSON from clients -> gRPC to services.
+# Public API gateway (Envoy): REST/JSON with a JWT from clients -> gRPC to services.
 #
-# Adding a service (look for the "ADD SERVICE" markers below):
-#   1. Add its .proto (with google.api.http annotations) and rebuild descriptor.binpb.
-#   2. Add the transcoder filter (first service only) / add its fully qualified
-#      name to the transcoder `services` list.
-#   3. Add a route: one path prefix per service.
-#   4. Add a cluster: the service's real address.
+# Local MVP: the services run on the host (ports 9001..9004) and Envoy runs in Docker,
+# so clusters point at host.docker.internal. The descriptor is built with
+# `make gateway-descriptor` (rebuild it and restart Envoy after any .proto change).
 #
-# The transcoder filter is intentionally absent until the first service exists:
-# `proto_descriptor` is required, so the filter needs a real descriptor file
-# (with an empty `services` list the filter is disabled).
+# Adding a service:
+#   1. Annotate its RPCs with google.api.http, run `make gateway-descriptor`.
+#   2. Add its fully qualified name to the transcoder `services` list.
+#   3. Add a route (one path prefix per service) and a cluster.
+# Internal RPCs (e.g. AdService.LockAds) have no annotation and are not reachable
+# (auto_mapping is false; only /v1/ routes exist).
 
 admin:
   address:
-    socket_address: { address: 127.0.0.1, port_value: 9901 }
+    socket_address: { address: 0.0.0.0, port_value: 9901 }   # published on 127.0.0.1 only by compose
 
 static_resources:
   listeners:
@@ -34,52 +34,108 @@ static_resources:
                       routes:
                         - match: { path: "/healthz" }
                           direct_response: { status: 200, body: { inline_string: "ok" } }
-                        - match: { prefix: "/docs/" }
-                          route: { cluster: docs, prefix_rewrite: "/" }
-                        # ADD SERVICE (route), e.g.:
-                        # - match: { prefix: "/v1/users" }
-                        #   route: { cluster: user_service }
+                        - match: { prefix: "/v1/ads" }
+                          route: { cluster: ad_service }
+                        - match: { prefix: "/v1/matching" }
+                          route: { cluster: matching_service }
+                        - match: { prefix: "/v1/negotiations" }
+                          route: { cluster: negotiation_service }
+                        - match: { prefix: "/v1/swaps" }
+                          route: { cluster: swap_service }
+                        # Swap also owns the dev-only locker simulation.
+                        - match: { prefix: "/v1/dev/swaps/" }
+                          route: { cluster: swap_service }
                 http_filters:
-                  # ADD SERVICE (transcoder). Put this BEFORE the router filter:
-                  # - name: envoy.filters.http.grpc_json_transcoder
-                  #   typed_config:
-                  #     "@type": type.googleapis.com/envoy.extensions.filters.http.grpc_json_transcoder.v3.GrpcJsonTranscoder
-                  #     proto_descriptor: /etc/envoy/descriptor.binpb
-                  #     services:
-                  #       - taakht.user.v1.UserService
-                  #     auto_mapping: false
-                  #     # Required: without it the route is re-matched on the rewritten
-                  #     # /pkg.Service/Method path and every transcoded call returns 404.
-                  #     match_incoming_request_route: true
-                  #     ignore_unknown_query_parameters: true
-                  #     convert_grpc_status: true
+                  # Every /v1/ route requires a valid JWT. On success the `sub` claim
+                  # is written to x-user-id, replacing any value the client sent.
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      providers:
+                        dev:
+                          issuer: taakht-dev
+                          claim_to_headers:
+                            - header_name: x-user-id
+                              claim_name: sub
+                          # DEV ONLY secret: taakht-dev-secret-0123456789abcdef (tools/devtoken signs with it).
+                          local_jwks:
+                            inline_string: '{"keys":[{"kty":"oct","alg":"HS256","k":"dGFha2h0LWRldi1zZWNyZXQtMDEyMzQ1Njc4OWFiY2RlZg"}]}'
+                      rules:
+                        - match: { prefix: "/v1/" }
+                          requires: { provider_name: dev }
+                  - name: envoy.filters.http.grpc_json_transcoder
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.grpc_json_transcoder.v3.GrpcJsonTranscoder
+                      proto_descriptor: /etc/envoy/descriptor.binpb
+                      services:
+                        - taakht.ad.v1.AdService
+                        - taakht.matching.v1.MatchingService
+                        - taakht.negotiation.v1.NegotiationService
+                        - taakht.swap.v1.SwapService
+                      auto_mapping: false
+                      # Required: without it the route is re-matched on the rewritten
+                      # /pkg.Service/Method path and every transcoded call returns 404.
+                      match_incoming_request_route: true
+                      ignore_unknown_query_parameters: true
+                      convert_grpc_status: true
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
-    # Static docs site (Scalar + openapi.yaml).
-    - name: docs
+    - name: ad_service
       type: STRICT_DNS
+      dns_lookup_family: V4_ONLY   # host.docker.internal also resolves to an unroutable IPv6 address
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config: { http2_protocol_options: {} }   # gRPC requires HTTP/2
       load_assignment:
-        cluster_name: docs
+        cluster_name: ad_service
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
-                    socket_address: { address: docs, port_value: 80 }
-
-    # ADD SERVICE (cluster), e.g.:
-    # - name: user_service
-    #   type: STRICT_DNS
-    #   typed_extension_protocol_options:
-    #     envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
-    #       "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
-    #       explicit_http_config: { http2_protocol_options: {} }   # gRPC requires HTTP/2
-    #   load_assignment:
-    #     cluster_name: user_service
-    #     endpoints:
-    #       - lb_endpoints:
-    #           - endpoint:
-    #               address:
-    #                 socket_address: { address: user-service, port_value: 9090 }
+                    socket_address: { address: host.docker.internal, port_value: 9001 }
+    - name: matching_service
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY   # host.docker.internal also resolves to an unroutable IPv6 address
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config: { http2_protocol_options: {} }   # gRPC requires HTTP/2
+      load_assignment:
+        cluster_name: matching_service
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: host.docker.internal, port_value: 9002 }
+    - name: negotiation_service
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY   # host.docker.internal also resolves to an unroutable IPv6 address
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config: { http2_protocol_options: {} }   # gRPC requires HTTP/2
+      load_assignment:
+        cluster_name: negotiation_service
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: host.docker.internal, port_value: 9003 }
+    - name: swap_service
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY   # host.docker.internal also resolves to an unroutable IPv6 address
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config: { http2_protocol_options: {} }   # gRPC requires HTTP/2
+      load_assignment:
+        cluster_name: swap_service
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: host.docker.internal, port_value: 9004 }

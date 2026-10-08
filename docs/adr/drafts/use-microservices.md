@@ -17,13 +17,15 @@ Three drivers, kept separate on purpose:
 
 ## Decision
 
-We will build the system as independently deployable services, each owning its data and communicating over gRPC and Kafka events. The working boundaries are Ad and Matching (Go), Deal (negotiation and settlement together) and Reputation (.NET); Communication and Delivery Orchestration start as minimal or mocked services. These boundaries are confirmed in the service decomposition decision before each service is implemented.
+We will build the system as independently deployable services, each owning its data and communicating over gRPC and Kafka events. The working boundaries are Ad and Matching (Go) and Negotiation and Swap (.NET); Reputation and Communication are not built, and Delivery Orchestration is a mock. These boundaries are confirmed in the service decomposition decision before each service is implemented.
+
+MVP note (2026-10-08): the one-week MVP built exactly these four services (Ad, Matching, Negotiation, Swap), each with its own database, gRPC between them and Kafka events through an outbox. The earlier wording grouped negotiation and settlement as one Deal service and named Reputation as a service; see [keep Negotiation and Swap as separate services](keep-negotiation-and-swap-as-separate-services.md) and the [MVP architecture](../../architecture/mvp-architecture.md).
 
 ## Options considered
 
 1. **Microservices from the start (chosen)** - serves all three drivers; boundaries are enforced by processes, not by discipline; the two people can work in parallel. Cost: the "microservice premium" (automated deployment, monitoring, eventual consistency, failure handling) lands on two people, and a wrong boundary is expensive to move.
 2. **Modular monolith with enforced module boundaries** - the lowest-risk and fastest start, and the common advice for new systems; services can be extracted later when measurements justify it. Rejected because it does not demonstrate the distributed problems the project is meant to show, and because a one-language deployable does not fit two people working in two languages.
-3. **A few coarse services, split further as boundaries stabilise** - a middle path. The chosen option is already coarse (four services instead of the README's eight rows); going coarser would remove the Ad, Deal and Matching boundaries where the concurrency and consistency problems appear.
+3. **A few coarse services, split further as boundaries stabilise** - a middle path. The chosen option is already coarse (four services instead of the README's eight rows); going coarser would remove the Ad, Negotiation/Swap and Matching boundaries where the concurrency and consistency problems appear.
 
 ## Consequences
 

@@ -101,7 +101,15 @@ On Windows, run `make` from Git Bash. Prerequisites, hooks, CI and troubleshooti
 
 The demo is **API-driven**: no product UI (at most a minimal UI for testing), everything is exercised through API calls against seeded data.
 
-`TBD (planned, nothing exists yet):` one command to start the whole system and one to seed fake users, categories and Ads.
+Start the whole system (Postgres, Kafka and the four services) with one command; users `user-1`..`user-4` and the categories come from `config/eligibility.json`:
+
+```bash
+make dev          # start infra + all services in the background
+make scenario     # scripted end-to-end walkthrough (make e2e runs the tests)
+make dev-stop     # stop the services; make reset wipes all data
+```
+
+Prerequisites, ports, log locations, `grpcurl` examples and troubleshooting are in [Running locally](docs/guidelines/running-locally.md).
 
 Then follow a scripted walkthrough of API calls: log in as a seeded user, publish an Ad, watch a match notification, send competing Swap Requests, negotiate Proposals, approve, lock, settle.
 

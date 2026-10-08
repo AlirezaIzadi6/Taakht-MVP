@@ -12,7 +12,7 @@ GO_MODULES := $(shell find . -name go.mod -not -path '*/node_modules/*' -exec di
 .PHONY: help setup prereqs tools hooks fmt lint test
 
 help: ## Show available targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-10s %s\n", $$1, $$2}'
 
 setup: prereqs tools hooks ## One-time developer environment setup
 
@@ -57,7 +57,7 @@ PROTO_INCLUDE ?= $(shell dirname "$$(command -v protoc)")/../include
 
 proto: ## Regenerate Go code from api/proto (.NET generates at build time via Grpc.Tools)
 	@rm -rf gen/go/taakht
-	protoc -I api/proto -I "$(PROTO_INCLUDE)" \
+	protoc -I api/proto -I third_party -I "$(PROTO_INCLUDE)" \
 		--go_out=gen/go --go_opt=paths=source_relative \
 		--go-grpc_out=gen/go --go-grpc_opt=paths=source_relative \
 		$$(find api/proto -name '*.proto')
@@ -70,3 +70,44 @@ down: ## Stop local infrastructure and delete its data
 
 logs: ## Follow infrastructure logs
 	docker compose -f deploy/docker-compose.yml logs -f
+
+# ---------- MVP: run the whole system locally ----------
+.PHONY: dev dev-stop dev-status e2e scenario reset
+
+dev: ## Start infra and all services in the background (scripts/dev.sh start)
+	@scripts/dev.sh start
+
+dev-stop: ## Stop the locally running services (infra keeps running)
+	@scripts/dev.sh stop
+
+dev-status: ## Show which services are up
+	@scripts/dev.sh status
+
+e2e: ## Run the end-to-end tests in tests/e2e (needs make dev)
+	@if [ -d tests/e2e ]; then cd tests/e2e && E2E=1 go test ./... ; else echo "tests/e2e does not exist yet"; fi
+
+scenario: ## Run the scripted demo scenario (needs make dev)
+	@cd tests/e2e && go run ./cmd/scenario
+
+reset: ## Stop services and wipe all data (infra down -v, then up)
+	@scripts/dev.sh stop
+	@$(MAKE) --no-print-directory down
+	@$(MAKE) --no-print-directory up
+
+# ---------- MVP: REST edge (Envoy) ----------
+.PHONY: gateway-descriptor
+
+gateway-descriptor: ## Rebuild gateway/descriptor.binpb (Envoy transcoder) from api/proto
+	protoc -I api/proto -I third_party -I "$(PROTO_INCLUDE)" \
+		--include_imports --include_source_info \
+		-o gateway/descriptor.binpb \
+		api/proto/taakht/ad/v1/ad.proto \
+		api/proto/taakht/matching/v1/matching.proto \
+		api/proto/taakht/negotiation/v1/negotiation.proto \
+		api/proto/taakht/swap/v1/swap.proto
+
+# ---------- MVP: REST demo ----------
+.PHONY: demo
+
+demo: ## Run the narrated REST demo through Envoy (needs make up + scripts/dev.sh start); DEMO_ARGS="--pause" or "timeout"
+	@scripts/demo.sh $(DEMO_ARGS)

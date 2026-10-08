@@ -23,6 +23,7 @@ jobs:
     outputs:
       dotnet: ${{ steps.filter.outputs.dotnet }}
       go: ${{ steps.filter.outputs.go }}
+      e2e: ${{ steps.filter.outputs.e2e }}
       dotnet-solutions: ${{ steps.solutions.outputs.list }}
       go-modules: ${{ steps.modules.outputs.list }}
     steps:
@@ -48,6 +49,14 @@ jobs:
               - '**/go.sum'
               - 'go.work'
               - '.golangci.yml'
+              - '.github/workflows/ci.yml'
+            e2e:
+              - 'src/**'
+              - 'libs/**'
+              - 'api/**'
+              - 'tests/**'
+              - 'config/**'
+              - 'deploy/**'
               - '.github/workflows/ci.yml'
 
       # Every solution file (one per .NET service) becomes one matrix entry.
@@ -83,6 +92,18 @@ jobs:
         solution: ${{ fromJson(needs.changes.outputs.dotnet-solutions) }}
     env:
       SOLUTION: ${{ matrix.solution }}
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: taakht
+          POSTGRES_PASSWORD: taakht
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U taakht"
+          --health-interval 3s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -98,7 +119,40 @@ jobs:
       - name: Build (analyzers + warnings as errors)
         run: dotnet build "$SOLUTION" -c Release --no-restore
 
+      # Single-node Kafka as in deploy/docker-compose.yml, only for the shared lib that has Kafka tests.
+      # Host networking keeps localhost:9094 valid, so the internal listeners advertise localhost too.
+      - name: Start Kafka
+        if: contains(matrix.solution, 'libs/dotnet')
+        run: |
+          docker run -d --name kafka --network host \
+            -e KAFKA_NODE_ID=1 \
+            -e KAFKA_PROCESS_ROLES=broker,controller \
+            -e KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094 \
+            -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092,EXTERNAL://localhost:9094 \
+            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT \
+            -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            -e KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+            -e KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
+            -e KAFKA_AUTO_CREATE_TOPICS_ENABLE=true \
+            -e KAFKA_NUM_PARTITIONS=3 \
+            apache/kafka:3.9.0
+          for _ in $(seq 1 60); do
+            if docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+              echo "kafka ready"; exit 0
+            fi
+            sleep 2
+          done
+          docker logs kafka | tail -n 50
+          echo "kafka did not become ready"; exit 1
+
+      # DB/Kafka-backed tests skip unless these variables are set, so they run here.
       - name: Test
+        env:
+          TEST_DATABASE_URL: postgres://taakht:taakht@localhost:5432/postgres?sslmode=disable
+          KAFKA_BROKERS: ${{ contains(matrix.solution, 'libs/dotnet') && 'localhost:9094' || '' }}
         run: dotnet test "$SOLUTION" -c Release --no-build
 
   go:
@@ -109,6 +163,18 @@ jobs:
       fail-fast: false
       matrix:
         module: ${{ fromJson(needs.changes.outputs.go-modules) }}
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: taakht
+          POSTGRES_PASSWORD: taakht
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U taakht"
+          --health-interval 3s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -124,11 +190,168 @@ jobs:
           working-directory: ${{ matrix.module }}
           args: --config ${{ github.workspace }}/.golangci.yml
 
+      # Single-node Kafka as in deploy/docker-compose.yml, only for modules whose tests use it.
+      # Host networking keeps localhost:9094 valid, so the internal listeners advertise localhost too.
+      - name: Start Kafka
+        if: contains(fromJSON('["./libs/goplatform","./src/ad","./src/matching"]'), matrix.module)
+        run: |
+          docker run -d --name kafka --network host \
+            -e KAFKA_NODE_ID=1 \
+            -e KAFKA_PROCESS_ROLES=broker,controller \
+            -e KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094 \
+            -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092,EXTERNAL://localhost:9094 \
+            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT \
+            -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            -e KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+            -e KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
+            -e KAFKA_AUTO_CREATE_TOPICS_ENABLE=true \
+            -e KAFKA_NUM_PARTITIONS=3 \
+            apache/kafka:3.9.0
+          for _ in $(seq 1 60); do
+            if docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+              echo "kafka ready"; exit 0
+            fi
+            sleep 2
+          done
+          docker logs kafka | tail -n 50
+          echo "kafka did not become ready"; exit 1
+
+      # DB/Kafka-backed tests skip unless these variables are set, so the lock/concurrency tests run here.
       - name: Test
         working-directory: ${{ matrix.module }}
+        env:
+          TEST_DATABASE_URL: postgres://taakht:taakht@localhost:5432/postgres?sslmode=disable
+          KAFKA_BROKERS: ${{ contains(fromJSON('["./libs/goplatform","./src/ad","./src/matching"]'), matrix.module) && 'localhost:9094' || '' }}
         run: go test -race ./...
 
+  # End-to-end: real Postgres + Kafka and the four services on the runner, driven over gRPC by tests/e2e.
+  # Informational only: continue-on-error stops a red e2e run from failing the workflow, and ci-ok
+  # deliberately does not list it in `needs`, so it never blocks merging.
+  e2e:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.e2e == 'true'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: taakht
+          POSTGRES_PASSWORD: taakht
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U taakht"
+          --health-interval 3s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DB_BASE: postgres://taakht:taakht@localhost:5432
+      KAFKA_BROKERS: localhost:9094
+      PGPASSWORD: taakht
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/e2e/go.mod
+          cache-dependency-path: tests/e2e/go.sum
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Start Kafka
+        run: |
+          docker run -d --name kafka --network host \
+            -e KAFKA_NODE_ID=1 \
+            -e KAFKA_PROCESS_ROLES=broker,controller \
+            -e KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094 \
+            -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092,EXTERNAL://localhost:9094 \
+            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT \
+            -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            -e KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+            -e KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
+            -e KAFKA_AUTO_CREATE_TOPICS_ENABLE=true \
+            -e KAFKA_NUM_PARTITIONS=3 \
+            apache/kafka:3.9.0
+          for _ in $(seq 1 60); do
+            if docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+              echo "kafka ready"; exit 0
+            fi
+            sleep 2
+          done
+          docker logs kafka | tail -n 50
+          echo "kafka did not become ready"; exit 1
+
+      # One database per service, same script as the local docker compose.
+      - name: Create databases
+        run: psql -h localhost -U taakht -d postgres -v ON_ERROR_STOP=1 -f deploy/postgres/init.sql
+
+      # Not scripts/dev.sh: it targets Windows Git Bash (.exe, taskkill, netstat) and needs docker compose.
+      # Ports are the services' defaults (9001-9004).
+      - name: Build and start services
+        run: |
+          root="$GITHUB_WORKSPACE"
+          mkdir -p "$root/.run/bin" "$root/.run/logs"
+          export KAFKA_BROKERS ELIGIBILITY_FILE="$root/config/eligibility.json" PAYMENT_DEADLINE=2m AD_ADDR=localhost:9001
+          export ASPNETCORE_ENVIRONMENT=Development DOTNET_ENVIRONMENT=Development
+
+          start_go() { # name port
+            (cd "src/$1" && go build -o "$root/.run/bin/$1" .)
+            DATABASE_URL="$DB_BASE/$1?sslmode=disable" GRPC_ADDR=":$2" \
+              nohup "$root/.run/bin/$1" >"$root/.run/logs/$1.log" 2>&1 </dev/null &
+          }
+          start_dotnet() { # name Name
+            local proj="src/$1/Taakht.$2/Taakht.$2.csproj"
+            dotnet build "$proj" -c Release -o "$root/.run/bin/$1" --nologo -v q
+            (cd "src/$1/Taakht.$2" && ConnectionStrings__Default="$DB_BASE/$1?sslmode=disable" \
+              nohup dotnet "$root/.run/bin/$1/Taakht.$2.dll" >"$root/.run/logs/$1.log" 2>&1 </dev/null &)
+          }
+          start_go ad 9001
+          start_go matching 9002
+          start_dotnet negotiation Negotiation
+          start_dotnet swap Swap
+
+          for port in 9001 9002 9003 9004; do
+            for _ in $(seq 1 60); do
+              if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then echo "port $port ready"; continue 2; fi
+              sleep 1
+            done
+            echo "port $port did not open"; exit 1
+          done
+
+      - name: E2E tests
+        working-directory: tests/e2e
+        env:
+          E2E: "1"
+        run: go test -count=1 ./...
+
+      - name: Service logs
+        if: failure()
+        run: |
+          for f in .run/logs/*.log; do echo "::group::$f"; tail -n 200 "$f"; echo "::endgroup::"; done
+
+      - name: Upload service logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-service-logs
+          path: .run/logs
+          if-no-files-found: ignore
+
+      - name: Stop services
+        if: always()
+        run: pkill -f '/\.run/bin/' || true
+
   # Single required status check for branch protection: skipped jobs count as OK, failed/cancelled ones don't.
+  # e2e is intentionally not in `needs`: it is informational only.
   ci-ok:
     if: always()
     needs: [pr-title, dotnet, go]
