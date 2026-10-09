@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
-// Run serves on addr until ctx is cancelled, then stops gracefully. register adds services.
+// Run serves (interceptors: overload mapping outermost, then identity) on addr until ctx is cancelled, then stops gracefully. register adds services.
 // Reflection is off unless TAAKHT_GRPC_REFLECTION=on.
 func Run(ctx context.Context, addr string, register func(*grpc.Server)) error {
 	var lc net.ListenConfig
@@ -23,7 +23,7 @@ func Run(ctx context.Context, addr string, register func(*grpc.Server)) error {
 		return fmt.Errorf("server: listen %s: %w", addr, err)
 	}
 	identity.WarnIfDefaultToken()
-	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(identity.ServerInterceptor()))
+	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(OverloadInterceptor(RequestTimeout()), identity.ServerInterceptor()))
 	register(srv)
 	if os.Getenv("TAAKHT_GRPC_REFLECTION") == "on" {
 		reflection.Register(srv)

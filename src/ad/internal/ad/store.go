@@ -53,7 +53,7 @@ func inTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) err
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return status.Errorf(codes.Internal, "commit: %v", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
@@ -83,7 +83,7 @@ func loadAdForUpdate(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*adRow, erro
 		return nil, status.Errorf(codes.NotFound, "ad %s not found", id)
 	}
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "load ad: %v", err)
+		return nil, fmt.Errorf("load ad: %w", err)
 	}
 	return r, nil
 }
@@ -97,7 +97,7 @@ func loadAd(ctx context.Context, q interface {
 		return nil, status.Errorf(codes.NotFound, "ad %s not found", id)
 	}
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "load ad: %v", err)
+		return nil, fmt.Errorf("load ad: %w", err)
 	}
 	return r, nil
 }
@@ -118,11 +118,11 @@ func loadSpec(ctx context.Context, q interface {
 		return nil, status.Errorf(codes.NotFound, "ad %s has no version %d", id, version)
 	}
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "load spec: %v", err)
+		return nil, fmt.Errorf("load spec: %w", err)
 	}
 	spec := &adv1.AdSpec{}
 	if err := protojson.Unmarshal(raw, spec); err != nil {
-		return nil, status.Errorf(codes.Internal, "decode spec: %v", err)
+		return nil, fmt.Errorf("decode spec: %w", err)
 	}
 	return &specVersion{spec: spec, createdAt: at}, nil
 }
@@ -130,11 +130,11 @@ func loadSpec(ctx context.Context, q interface {
 func insertSpec(ctx context.Context, tx pgx.Tx, id uuid.UUID, version int32, spec *adv1.AdSpec, at time.Time) error {
 	raw, err := protojson.Marshal(spec)
 	if err != nil {
-		return status.Errorf(codes.Internal, "encode spec: %v", err)
+		return fmt.Errorf("encode spec: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO ad_version (ad_id, version, spec, created_at) VALUES ($1, $2, $3, $4)`,
 		id, version, raw, at); err != nil {
-		return status.Errorf(codes.Internal, "insert version: %v", err)
+		return fmt.Errorf("insert version: %w", err)
 	}
 	return nil
 }
@@ -143,7 +143,7 @@ func insertSpec(ctx context.Context, tx pgx.Tx, id uuid.UUID, version int32, spe
 func currentSnapshot(ctx context.Context, tx pgx.Tx, r *adRow) (*adv1.Ad, error) {
 	id, err := uuid.Parse(r.ID)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "bad stored id: %v", err)
+		return nil, fmt.Errorf("bad stored id: %w", err)
 	}
 	sv, err := loadSpec(ctx, tx, id, r.Version)
 	if err != nil {
@@ -159,11 +159,11 @@ func tsOf(t time.Time) *timestamppb.Timestamp { return timestamppb.New(t) }
 func decodeSpec(raw []byte) (*adv1.AdSpec, error) {
 	spec := &adv1.AdSpec{}
 	if err := protojson.Unmarshal(raw, spec); err != nil {
-		return nil, status.Errorf(codes.Internal, "decode spec: %v", err)
+		return nil, fmt.Errorf("decode spec: %w", err)
 	}
 	return spec, nil
 }
 
 func internal(op string, err error) error {
-	return status.Error(codes.Internal, fmt.Sprintf("%s: %v", op, err))
+	return fmt.Errorf("%s: %w", op, err)
 }

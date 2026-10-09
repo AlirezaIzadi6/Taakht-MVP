@@ -44,8 +44,8 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	dbURL := env("DATABASE_URL", "postgres://taakht:taakht@localhost:5432/matching?sslmode=disable")
-	brokers := strings.Split(env("KAFKA_BROKERS", "localhost:9094"), ",")
+	dbURL := env("DATABASE_URL", "postgres://taakht:taakht@127.0.0.1:5432/matching?sslmode=disable")
+	brokers := strings.Split(env("KAFKA_BROKERS", "127.0.0.1:9094"), ",")
 	addr := env("GRPC_ADDR", ":9002")
 	eligibility := env("ELIGIBILITY_FILE", filepath.FromSlash("../../config/eligibility.json"))
 

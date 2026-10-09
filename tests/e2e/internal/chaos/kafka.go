@@ -13,7 +13,7 @@ import (
 )
 
 // Brokers is the external listener of the local Kafka container.
-const Brokers = "localhost:9094"
+const Brokers = "127.0.0.1:9094"
 
 // NewUUID returns a random version 4 UUID in the textual form the services expect for event ids.
 func NewUUID() string {

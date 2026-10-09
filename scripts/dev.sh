@@ -26,8 +26,8 @@ declare -A PORT=([ad]=9001 [matching]=9002 [negotiation]=9003 [swap]=9004)
 declare -A KIND=([ad]=go [matching]=go [negotiation]=dotnet [swap]=dotnet)
 WAIT_SECS="${WAIT_SECS:-60}"
 PAYMENT_DEADLINE="${PAYMENT_DEADLINE:-2m}"
-KAFKA_BROKERS="${KAFKA_BROKERS:-localhost:9094}"
-DB_BASE="${DB_BASE:-postgres://taakht:taakht@localhost:5432}"
+KAFKA_BROKERS="${KAFKA_BROKERS:-127.0.0.1:9094}"
+DB_BASE="${DB_BASE:-postgres://taakht:taakht@127.0.0.1:5432}"
 
 warn() { echo "WARN: $*" >&2; }
 die() {
@@ -103,7 +103,7 @@ build_svc() {
 run_svc() {
   local s="$1" p="${PORT[$1]}" log="$LOGS/$1.log" proj dll wp
   : >"$log"
-  export DATABASE_URL="${DB_BASE}/$s?sslmode=disable" KAFKA_BROKERS GRPC_ADDR=":$p" AD_ADDR="${AD_ADDR:-localhost:9001}"
+  export DATABASE_URL="${DB_BASE}/$s?sslmode=disable" KAFKA_BROKERS GRPC_ADDR=":$p" AD_ADDR="${AD_ADDR:-127.0.0.1:9001}"
   export ELIGIBILITY_FILE="${ELIGIBILITY_FILE:-$WROOT/config/eligibility.json}"
   export PAYMENT_DEADLINE TAAKHT_GRPC_REFLECTION="${TAAKHT_GRPC_REFLECTION:-on}"
   export INTERNAL_AUTH_TOKEN="${INTERNAL_AUTH_TOKEN:-dev-internal-token}" # DEV ONLY default; proves system: callers

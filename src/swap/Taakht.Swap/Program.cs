@@ -10,7 +10,7 @@ using Taakht.Swap.Infrastructure;
 var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
 
-const string DefaultDatabaseUrl = "postgres://taakht:taakht@localhost:5432/swap?sslmode=disable";
+const string DefaultDatabaseUrl = "postgres://taakht:taakht@127.0.0.1:5432/swap?sslmode=disable";
 if (config["DATABASE_URL"] is null && config.GetConnectionString("Default") is null)
 {
     config["DATABASE_URL"] = DefaultDatabaseUrl;
@@ -20,7 +20,7 @@ var grpcAddr = config["GRPC_ADDR"] ?? ":9004";
 var grpcPort = int.Parse(grpcAddr[(grpcAddr.LastIndexOf(':') + 1)..], System.Globalization.CultureInfo.InvariantCulture);
 builder.WebHost.ConfigureKestrel(o => o.ListenAnyIP(grpcPort, l => l.Protocols = HttpProtocols.Http2));
 
-var adAddr = config["AD_ADDR"] ?? "localhost:9001";
+var adAddr = config["AD_ADDR"] ?? "127.0.0.1:9001";
 var paymentDeadline = DurationParser.ParseBounded(
     "PAYMENT_DEADLINE", config["PAYMENT_DEADLINE"] ?? "1h", TimeSpan.FromMilliseconds(1), TimeSpan.FromDays(30));
 
@@ -51,7 +51,11 @@ builder.Services.AddHostedService(sp => new EventConsumer(
     },
     sp.GetRequiredService<ILogger<EventConsumer>>()));
 
-builder.Services.AddGrpc(o => o.Interceptors.Add<ServerIdentityInterceptor>());
+builder.Services.AddGrpc(o =>
+{
+    o.Interceptors.Add<OverloadInterceptor>();
+    o.Interceptors.Add<ServerIdentityInterceptor>();
+});
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddGrpcReflection();

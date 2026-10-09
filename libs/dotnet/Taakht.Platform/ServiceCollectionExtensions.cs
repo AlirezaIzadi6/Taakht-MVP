@@ -9,12 +9,14 @@ namespace Taakht.Platform;
 
 public static class ServiceCollectionExtensions
 {
-    public const string DefaultDatabaseUrl = "postgres://taakht:taakht@localhost:5432/postgres?sslmode=disable";
-    public const string DefaultKafkaBrokers = "localhost:9094";
+    public const string DefaultDatabaseUrl = "postgres://taakht:taakht@127.0.0.1:5432/postgres?sslmode=disable";
+    public const string DefaultKafkaBrokers = "127.0.0.1:9094";
 
     /// <summary>
-    /// Registers NpgsqlDataSource (DATABASE_URL, else ConnectionStrings:Default), KafkaOptions (KAFKA_BROKERS)
-    /// and the identity interceptors as singletons.
+    /// Registers NpgsqlDataSource (DATABASE_URL, else ConnectionStrings:Default; pool bounded by DB_MAX_CONNS,
+    /// DB_MIN_CONNS and DB_ACQUIRE_TIMEOUT, see <see cref="DatabasePoolSettings"/>), KafkaOptions (KAFKA_BROKERS)
+    /// and the overload and identity interceptors as singletons. Add <see cref="OverloadInterceptor"/> to the gRPC
+    /// server options first (outermost), then <see cref="ServerIdentityInterceptor"/>.
     /// </summary>
     public static IServiceCollection AddTaakhtPlatform(this IServiceCollection services, IConfiguration configuration)
     {
@@ -23,8 +25,12 @@ public static class ServiceCollectionExtensions
         var dbUrl = configuration["DATABASE_URL"] ?? configuration.GetConnectionString("Default") ?? DefaultDatabaseUrl;
         var brokers = configuration["KAFKA_BROKERS"] ?? DefaultKafkaBrokers;
 
-        services.AddSingleton(_ => DatabaseUrl.CreateDataSource(dbUrl));
+        var pool = DatabasePoolSettings.FromConfiguration(configuration);
+
+        services.AddSingleton(pool);
+        services.AddSingleton(_ => DatabaseUrl.CreateDataSource(dbUrl, pool));
         services.AddSingleton(new KafkaOptions(brokers));
+        services.AddSingleton<OverloadInterceptor>();
         services.AddSingleton<ServerIdentityInterceptor>();
         services.AddSingleton<ClientIdentityInterceptor>();
         services.AddHostedService<InternalAuthWarning>();

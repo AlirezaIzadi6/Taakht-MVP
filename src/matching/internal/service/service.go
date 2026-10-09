@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -49,7 +50,7 @@ func (s *Service) Search(ctx context.Context, req *matchingv1.SearchRequest) (*m
 		NeighborhoodIDs: crit.NeighborhoodIDs,
 	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "search: %v", err)
+		return nil, fmt.Errorf("search: %w", err)
 	}
 	return toResponse(match.RankBrowse(s.Geo, crit, cands, clampLimit(req.GetLimit()))), nil
 }
@@ -64,7 +65,7 @@ func (s *Service) FindMatches(ctx context.Context, req *matchingv1.FindMatchesRe
 	}
 	me, err := index.Get(ctx, s.DB, req.GetAdId())
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "find matches: %v", err)
+		return nil, fmt.Errorf("find matches: %w", err)
 	}
 	if me == nil {
 		return nil, status.Error(codes.NotFound, "ad is not in the match index; publish it first")
@@ -80,7 +81,7 @@ func (s *Service) FindMatches(ctx context.Context, req *matchingv1.FindMatchesRe
 		WantsCategory:  spec.GetHaveCategory(),
 	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "find matches: %v", err)
+		return nil, fmt.Errorf("find matches: %w", err)
 	}
 	return toResponse(match.RankTwoSided(s.Geo, me, cands, clampLimit(req.GetLimit()))), nil
 }

@@ -28,6 +28,16 @@ public class DatabaseUrlTests
         Assert.Equal(plain, DatabaseUrl.ToConnectionString(plain));
     }
 
+    [Theory]
+    [InlineData("postgres://u:p@localhost:5432/d", "127.0.0.1")]
+    [InlineData("postgres://u:p@LOCALHOST/d", "127.0.0.1")]
+    [InlineData("Host=localhost;Database=d", "127.0.0.1")]
+    [InlineData("postgres://u:p@127.0.0.1/d", "127.0.0.1")]
+    [InlineData("postgres://u:p@db.local/d", "db.local")]
+    [InlineData("postgres://u:p@localhost.example.com/d", "localhost.example.com")]
+    public void Rewrites_a_localhost_host_to_the_loopback_address(string url, string expectedHost) =>
+        Assert.Equal(expectedHost, new NpgsqlConnectionStringBuilder(DatabaseUrl.ToConnectionString(url)).Host);
+
     [Fact]
     public void Rejects_unknown_sslmode()
     {

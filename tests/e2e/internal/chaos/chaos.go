@@ -203,7 +203,7 @@ func StopKafka(t TB) {
 func StartKafka(t TB) {
 	t.Helper()
 	compose(t, "start", "kafka")
-	WaitPort(t, "localhost:9094", true, 90*time.Second)
+	WaitPort(t, "127.0.0.1:9094", true, 90*time.Second)
 	// The port opens before the broker is able to serve metadata; give it a moment.
 	time.Sleep(5 * time.Second)
 	t.Logf("chaos: kafka started")

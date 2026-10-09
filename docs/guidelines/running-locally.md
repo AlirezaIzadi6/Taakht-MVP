@@ -32,7 +32,7 @@ Settings you can override through the environment: `PAYMENT_DEADLINE` (swap lock
 | swap | `localhost:9004` | `swap` |
 | Envoy gateway (REST + JWT) | `http://localhost:8080` | - |
 
-Postgres is on `localhost:5432` (user and password `taakht`), Kafka on `localhost:9094`. Envoy is started by `make up` together with them. Postgres, Kafka and Envoy's public port 8080 are published on loopback only (`127.0.0.1`), so they are not reachable from other machines on your network.
+Postgres is on `127.0.0.1:5432` (user and password `taakht`), Kafka on `127.0.0.1:9094`. Envoy is started by `make up` together with them. Postgres, Kafka and Envoy's public port 8080 are published on loopback only (`127.0.0.1`), so they are not reachable from other machines on your network.
 
 ## Demo and tests
 
@@ -84,5 +84,6 @@ New ads are hidden; publish with `AdService/PublishAd` to make matching see them
 | `port 900x is busy with a process not started by dev.sh` | Another process owns the port. Find it with `netstat -ano \| grep :9001`, stop it (`taskkill //PID <pid> //T //F`), or run `scripts/dev.sh stop`, which also frees the four ports. |
 | A service did not open its port in time | The script prints the log tail. Read `.run/logs/<svc>.log`; raise `WAIT_SECS` on a slow first build. |
 | Kafka not ready / services log connection errors to `localhost:9094` | `docker compose -f deploy/docker-compose.yml ps` must show `kafka` healthy. `make reset` recreates it. Services retry, so a short delay after `make up` is normal. |
+| New database connections take about 4 s on Windows (outbox lag of 4 s, HTTP calls that stall for 4 s whenever a .NET pool grows) | Use `127.0.0.1`, not `localhost`, for host-run services. `localhost` resolves to `::1` first; Docker publishes Postgres and Kafka on `127.0.0.1` only, so the refused IPv6 connect is paid again for every new physical connection (Npgsql twice, about 4.03 s against about 15 ms). `scripts/dev.sh` and the service defaults use `127.0.0.1`, and the platform libraries rewrite a database host of exactly `localhost`; set `DB_BASE`, `AD_ADDR` and `KAFKA_BROKERS` the same way if you override them. After changing the Kafka advertised listener, recreate Kafka with `make reset` (this wipes the data). |
 | Stale or broken data | `make reset` wipes every database and Kafka topic. |
 | `Permission denied` on `scripts/dev.sh` | `chmod +x scripts/dev.sh` (or call it as `bash scripts/dev.sh`). |

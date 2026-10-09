@@ -11,7 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
 
 var grpcAddr = config["GRPC_ADDR"] ?? ":9003";
-var adAddr = config["AD_ADDR"] ?? "localhost:9001";
+var adAddr = config["AD_ADDR"] ?? "127.0.0.1:9001";
 var cap = int.Parse(config["NEGOTIATION_CAP"] ?? "10", CultureInfo.InvariantCulture);
 var agreementPendingTimeout = HousekeepingOptions.ParseBounded(
     "AGREEMENT_PENDING_TIMEOUT",
@@ -47,6 +47,7 @@ builder.Services.AddGrpcClient<AdService.AdServiceClient>(o => o.Address = new U
     .AddInterceptor<ClientIdentityInterceptor>();
 builder.Services.AddGrpc(o =>
 {
+    o.Interceptors.Add<OverloadInterceptor>();
     o.Interceptors.Add<DomainExceptionInterceptor>();
     o.Interceptors.Add<ServerIdentityInterceptor>();
 });

@@ -39,6 +39,18 @@ public sealed class NegotiationService(
 
         var negotiation = SwapNegotiation.Open(Guid.NewGuid(), requesterAd, targetAd, userId, clock.GetUtcNow());
 
+        // The connection is released before the Ad service is called again for the response (WithAdsAsync).
+        var versions = await InsertNegotiationAsync(negotiation, requesterAd, targetAd, ct);
+        return await WithAdsAsync(new NegotiationView(negotiation, versions), ct);
+    }
+
+    /// <summary>
+    /// One connection, one transaction: lock both ad rows (fixed order), enforce the cap, insert, write the outbox row.
+    /// No remote call happens while the connection is held.
+    /// </summary>
+    private async Task<AdVersions> InsertNegotiationAsync(
+        SwapNegotiation negotiation, AdSnapshot requesterAd, AdSnapshot targetAd, CancellationToken ct)
+    {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
@@ -81,8 +93,7 @@ public sealed class NegotiationService(
         }, ct);
         await tx.CommitAsync(ct);
 
-        var versions = await VersionsAsync(conn, null, negotiation, ct);
-        return await WithAdsAsync(new NegotiationView(negotiation, versions), ct);
+        return await VersionsAsync(conn, null, negotiation, ct);
     }
 
     public async Task<NegotiationView> ApproveAdAsync(string userId, Guid negotiationId, int adVersion, CancellationToken ct)
@@ -288,14 +299,14 @@ public sealed class NegotiationService(
     /// </summary>
     private async Task<NegotiationView> TryReachAgreementAsync(Guid negotiationId, CancellationToken ct)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        var n = await NegotiationRepository.LoadAsync(conn, null, negotiationId, false, ct)
-            ?? throw new DomainException(DomainError.NotFound, "negotiation not found");
-        var local = await VersionsAsync(conn, null, n, ct);
+        // Read with a short-lived connection that is released before the two remote ad reads below.
+        var current = await GetViewAsync(negotiationId, ct);
+        var n = current.Negotiation;
+        var local = current.Versions;
 
         if (n.Status != NegotiationStatus.Open || !n.HasAllApprovals(local))
         {
-            return new NegotiationView(n, local);
+            return current;
         }
 
         var requesterAd = await ads.GetAdAsync(n.RequesterAdId, ct)
@@ -303,6 +314,7 @@ public sealed class NegotiationService(
         var targetAd = await ads.GetAdAsync(n.TargetAdId, ct)
             ?? throw new DomainException(DomainError.Aborted, "the target ad no longer exists");
 
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
         await NegotiationRepository.UpsertAdRefAsync(conn, tx, requesterAd, ct);
         await NegotiationRepository.UpsertAdRefAsync(conn, tx, targetAd, ct);
@@ -318,7 +330,9 @@ public sealed class NegotiationService(
         if (locked is null || locked.Status != NegotiationStatus.Open)
         {
             await tx.CommitAsync(ct);
-            return await GetViewAsync(negotiationId, ct);
+            var settled = await NegotiationRepository.LoadAsync(conn, null, negotiationId, false, ct)
+                ?? throw new DomainException(DomainError.NotFound, "negotiation not found");
+            return new NegotiationView(settled, await VersionsAsync(conn, null, settled, ct));
         }
 
         if (!locked.HasAllApprovals(synced))
