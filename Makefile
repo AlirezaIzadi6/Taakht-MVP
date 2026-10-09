@@ -115,7 +115,7 @@ demo: ## Run the narrated REST demo through Envoy (needs make up + scripts/dev.s
 # ---------- MVP: fault-injection (chaos) tests ----------
 .PHONY: chaos
 
-chaos: ## Fault-injection tests (kill services, stop Kafka/Postgres); needs make dev, takes ~15-25 min, stops/starts the stack
+chaos: ## Fault-injection tests (kill services, stop Kafka/Postgres); needs make dev, takes ~10 min, stops/starts the stack
 	@cd tests/e2e && CHAOS=1 E2E=1 go test -run TestChaos -v -count=1 -timeout 60m ./...
 
 # ---------- MVP: load and stress tests (k6) ----------
