@@ -20,7 +20,7 @@ make scenario     # scripted demo scenario; needs `make dev`
 
 `scripts/dev.sh` offers more: `start [svc...]`, `stop`, `status`, `logs <svc>` (follows the log), `restart [svc]`. A service whose project does not exist yet is skipped with a warning.
 
-Settings you can override through the environment: `PAYMENT_DEADLINE` (swap locker-fee deadline, default `2m`), `WAIT_SECS` (startup wait per service, default 60), `KAFKA_BROKERS`, `DB_BASE`, `AD_ADDR`, `ELIGIBILITY_FILE`. Example: `PAYMENT_DEADLINE=30s make dev`.
+Settings you can override through the environment: `PAYMENT_DEADLINE` (swap locker-fee deadline; `scripts/dev.sh` default `2m`, whereas the swap service started by hand defaults to `1h`), `WAIT_SECS` (startup wait per service, default 60), `KAFKA_BROKERS`, `DB_BASE`, `AD_ADDR`, `ELIGIBILITY_FILE`, `INTERNAL_AUTH_TOKEN`, `TAAKHT_GRPC_REFLECTION`. Pool sizes (`DB_MAX_CONNS`, `DB_MIN_CONNS`, `DB_ACQUIRE_TIMEOUT`) and the other service settings are documented in [MVP service conventions](mvp-service-conventions.md); they are not set by `dev.sh`, so the code defaults apply. Example: `PAYMENT_DEADLINE=30s make dev`.
 
 ## Ports
 
@@ -40,6 +40,8 @@ Postgres is on `127.0.0.1:5432` (user and password `taakht`), Kafka on `127.0.0.
 make demo       # narrated REST demo through Envoy (:8080); needs make up + scripts/dev.sh start; DEMO_ARGS="--pause" to step through
 make e2e        # end-to-end Go tests in tests/e2e; needs make dev
 make scenario   # scripted demo scenario over gRPC; needs make dev
+make chaos      # fault injection (about 10 min); kills services, stops Kafka and Postgres; stack must be unused
+make load       # k6 load tests (needs k6); modest defaults, saturates the machine at higher settings
 ```
 
 `make demo` additionally needs `jq` and `curl` on `PATH`.
@@ -83,7 +85,7 @@ New ads are hidden; publish with `AdService/PublishAd` to make matching see them
 | `make up failed` | Start Docker Desktop and retry. Details are in `.run/logs/infra.log`. |
 | `port 900x is busy with a process not started by dev.sh` | Another process owns the port. Find it with `netstat -ano \| grep :9001`, stop it (`taskkill //PID <pid> //T //F`), or run `scripts/dev.sh stop`, which also frees the four ports. |
 | A service did not open its port in time | The script prints the log tail. Read `.run/logs/<svc>.log`; raise `WAIT_SECS` on a slow first build. |
-| Kafka not ready / services log connection errors to `localhost:9094` | `docker compose -f deploy/docker-compose.yml ps` must show `kafka` healthy. `make reset` recreates it. Services retry, so a short delay after `make up` is normal. |
+| Kafka not ready / services log connection errors to `127.0.0.1:9094` | `docker compose -f deploy/docker-compose.yml ps` must show `kafka` healthy. `make reset` recreates it. Services retry, so a short delay after `make up` is normal. |
 | New database connections take about 4 s on Windows (outbox lag of 4 s, HTTP calls that stall for 4 s whenever a .NET pool grows) | Use `127.0.0.1`, not `localhost`, for host-run services. `localhost` resolves to `::1` first; Docker publishes Postgres and Kafka on `127.0.0.1` only, so the refused IPv6 connect is paid again for every new physical connection (Npgsql twice, about 4.03 s against about 15 ms). `scripts/dev.sh` and the service defaults use `127.0.0.1`, and the platform libraries rewrite a database host of exactly `localhost`; set `DB_BASE`, `AD_ADDR` and `KAFKA_BROKERS` the same way if you override them. After changing the Kafka advertised listener, recreate Kafka with `make reset` (this wipes the data). |
 | Stale or broken data | `make reset` wipes every database and Kafka topic. |
 | `Permission denied` on `scripts/dev.sh` | `chmod +x scripts/dev.sh` (or call it as `bash scripts/dev.sh`). |

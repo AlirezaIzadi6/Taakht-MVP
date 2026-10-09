@@ -64,7 +64,7 @@ If steps 1-5 and 7 run from one script, the MVP is done. Step 6 is the first thi
 - **Search:** plain SQL in the matching database. A small static neighborhood table with coordinates gives the distance part of the score. No Elasticsearch, no Redis.
 - **Identity:** `x-user-id` metadata read by one shared interceptor per language. Envoy `jwt_authn` sets it from the JWT `sub` without service changes (see [API conventions](../guidelines/api-conventions.md)). Service-to-service calls use the reserved ids `system:swap` and `system:negotiation`; real user ids must never start with `system:`.
 - **Eligibility Config:** a static file (categories, neighborhoods) validated by the ad service; matching reads the same file.
-- **Locker payment deadline:** configurable, 2 minutes in the demo (1 hour by design).
+- **Locker payment deadline:** configurable (`PAYMENT_DEADLINE`); the swap service defaults to 1 hour (the design value), `scripts/dev.sh` and the demo use 2 minutes.
 
 ## Cut or mocked
 
@@ -75,7 +75,8 @@ If steps 1-5 and 7 run from one script, the MVP is done. Step 6 is the first thi
 | Auth, KYC, Delivery/locker partner, Report | In-process mocks behind small interfaces (locker eligibility fails for one seeded user to show the error path) |
 | Pricing, Hotspots, home page, hide-when-capped, TTL expiry | Cut |
 | Item-condition claims | Cut |
-| Elasticsearch, Redis, Logstash, load tests | Cut |
+| Elasticsearch, Redis, Logstash | Cut |
+| Load tests, fault-injection tests | Cut from the one-week plan; added afterwards (see Status) |
 | Outbox relay | Simple poller per service (no Debezium) |
 
 ## Schedule (two tracks: Go = ad + matching, .NET = negotiation + swap)
@@ -99,35 +100,52 @@ If steps 1-5 and 7 run from one script, the MVP is done. Step 6 is the first thi
 
 ## Status (2026-10-09)
 
-Update: `ListMyAds`, `ListMySwaps` and `ListNegotiations` are now bounded and keyset-paginated (`pageSize` default 50, max 200, `pageToken` / `nextPageToken`); see [API conventions](../guidelines/api-conventions.md#pagination).
+Update: after the build week the repository also gained k6 load tests ([results](../testing/load-test-results.md)), seven fault-injection scenarios ([results](../testing/chaos-test-results.md)), connection-pool bounds with overload mapped to `UNAVAILABLE`, and the `127.0.0.1` fix for the Windows `localhost` stall. `ListMyAds`, `ListMySwaps` and `ListNegotiations` are now bounded and keyset-paginated (`pageSize` default 50, max 200, `pageToken` / `nextPageToken`); see [API conventions](../guidelines/api-conventions.md#pagination).
 
 What exists is described in [MVP architecture](../architecture/mvp-architecture.md), which also lists where the code differs from this plan and the remaining gaps. The [demo walkthrough](demo-walkthrough.md) shows the REST scenario; [Running locally](../guidelines/running-locally.md) shows how to start the stack.
 
 ### Built and verified
 
-Test counts are from the last runs recorded for this repository: .NET suites as reported by `dotnet test`, Go suites as `go test` packages passing. The Postgres-backed tests run against the local compose Postgres (`TEST_DATABASE_URL` set) and the Kafka round trips against the local Kafka (`KAFKA_BROKERS` set); CI provides both. Without those variables the dependent tests skip.
+Test counts are from the last runs recorded for this repository (2026-10-09): .NET suites as reported by `dotnet test` (Platform 114, Negotiation 80, Swap 65), Go suites as the packages `go test` reports as `ok` (10 packages with tests: `libs/goplatform` 6, `src/ad` 1, `src/matching` 3). The Postgres-backed tests run against the local compose Postgres (`TEST_DATABASE_URL` set) and the Kafka round trips against the local Kafka (`KAFKA_BROKERS` set); CI provides both. Without those variables the dependent tests skip.
 
 | Part | What is built | Verified |
 |---|---|---|
 | `libs/goplatform` (Go) | DB open and migrations, identity interceptors (system identities, id validation), gRPC server helper (reflection opt-in), outbox writer (`clock_timestamp()` ordering) and relay, idempotent consumer with permanent-error skipping into `dead_letter`, housekeeping (outbox, processed events, dead letters) | `go test` passes for `libs/goplatform` and its `identity` package, including the Kafka round trip when `KAFKA_BROKERS` is set |
-| `libs/dotnet/Taakht.Platform` | The same pieces for .NET (`PermanentEventException` into `dead_letter`, consumer survives `KafkaException` and logs unreadable events at error level, relay orders by `created_at, id`) | 69 tests |
+| `libs/dotnet/Taakht.Platform` | The same pieces for .NET (`PermanentEventException` into `dead_letter`, consumer survives `KafkaException` and logs unreadable events at error level, relay orders by `created_at, id`) | 114 tests |
 | ad (Go) | Create, edit (versions; an unchanged spec is a no-op), publish, hide, get (owner / system / published-only visibility, one `NOT_FOUND` message), list, `LockAds` (`system:swap` only); consumes `SwapCompleted` / `SwapCancelled`; per-ad event `seq`; input caps | `go test` passes for `src/ad/internal/ad` (rules, lifecycle, lock rules and idempotency, concurrent overlapping locks, swap event consumers) |
 | matching (Go) | Index from `ad.events` with `seq` ordering and tombstones, `Search`, `FindMatches`, scoring, `MatchFound` once per pair | `go test` passes for handlers, scoring and service packages |
-| negotiation (.NET) | Open (with cap), approve ad, revise, approve, reject, close, get, list; final synchronous check; `AgreementReached`; reacts to `ExclusiveLockAcquired` (only for an existing `AGREEMENT_PENDING`/`AGREED` winner), `SwapRejected` and `SwapCancelled` (by negotiation id); `AGREEMENT_PENDING` sweeper (republish, then cancel); both ads on every response; `ad not available` answers | 74 tests |
-| swap (.NET) | Lock saga, `SimulateLockerFeePaid` (own leg, dev only), payment deadline sweeper, mock partner, `SwapCompleted` / `SwapCancelled` with the negotiation id; malformed `AgreementReached` becomes a rejected swap; `PAYMENT_DEADLINE` bounds | 60 tests |
+| negotiation (.NET) | Open (with cap), approve ad, revise, approve, reject, close, get, list; final synchronous check; `AgreementReached`; reacts to `ExclusiveLockAcquired` (only for an existing `AGREEMENT_PENDING`/`AGREED` winner), `SwapRejected` and `SwapCancelled` (by negotiation id); `AGREEMENT_PENDING` sweeper (republish, then cancel); both ads on every response; `ad not available` answers | 80 tests |
+| swap (.NET) | Lock saga, `SimulateLockerFeePaid` (own leg, dev only), payment deadline sweeper, mock partner, `SwapCompleted` / `SwapCancelled` with the negotiation id; malformed `AgreementReached` becomes a rejected swap; `PAYMENT_DEADLINE` bounds | 65 tests |
 | Gateway | Envoy on `:8080`: REST/JSON to gRPC, JWT validation, `sub` written to `x-user-id`; dev token tool `tools/devtoken` | Exercised by `scripts/demo.sh` |
 | Scripts | `scripts/dev.sh` (start, stop, status, logs, restart; turns gRPC reflection on), `make dev / reset / e2e / scenario / demo` | Used to bring the stack up for the demo run |
 | End-to-end | `tests/e2e` (happy path, payment timeout, lock race, locker eligibility, ad-and-matching only; gRPC, run with `E2E=1` against the running stack) and `scripts/demo.sh` (narrated REST flow, plus a `timeout` variant) | The test file and the demo script exist; the demo walkthrough contains output of a real run. The `tests/e2e` suite (including `TestPaymentTimeout` with `PAYMENT_DEADLINE=5s`) and `scripts/demo.sh` were re-run on 2026-10-09 against the rebuilt stack and passed. In CI the `e2e` job is informational (`continue-on-error`) |
+| Load and fault injection | `tests/load` (k6: browse, negotiate, contention) and `tests/e2e/chaos_test.go` (7 scenarios) | Measured and run on 2026-10-09 on one Windows laptop, k6 on the same machine, Development mode, single runs; all 7 chaos scenarios passed. See [load test results](../testing/load-test-results.md) and [chaos test results](../testing/chaos-test-results.md) |
 
-Not covered by any test: a failure of Kafka or of a service in the middle of the saga (the behavior in the architecture document is derived from the code), and killing a consumer between the handler commit and the offset commit.
+Not covered by any test: killing a consumer between the handler commit and the offset commit, a crash between the Kafka produce and `published_at`, matching down and restart, the `AGREEMENT_PENDING` republish sweeper under a real outage, and a Kafka outage longer than the consumer session timeout.
 
-### Remaining (pending, not done)
+### Remaining
 
 | Item | State |
 |---|---|
-| Load test results | Not done; no throughput or latency numbers exist |
-| Fault-injection tests (Kafka or a service down mid-saga) | Not done |
-| Deployment beyond the local host (containers for the services, a real identity provider, service-to-service authentication) | Not done; services run as host processes, the gateway uses a static dev key |
+| Load test results | Done for one laptop ([results](../testing/load-test-results.md)); nothing says how a larger or multi-node setup behaves. Past 40 VUs of the full write flow the asynchronous chain, not the API, is the limit (not investigated) |
+| Fault-injection tests | 7 scenarios done and passed ([results](../testing/chaos-test-results.md)); matching down, the republish sweeper, a Kafka outage longer than the session timeout and a crash between produce and `published_at` were not run |
+| Deployment beyond the local host (containers for the services, a real identity provider, per-service service-to-service authentication such as mTLS) | Not done; services run as host processes, the gateway uses a static dev key, and `system:*` callers are proven only by one shared `INTERNAL_AUTH_TOKEN` (no rotation) |
 | Repair for a swap stuck in `LOCKING` (other than the sweeper's republished `AgreementReached`), a `dead_letter` replay tool and alerting, clearing `notified_pair`, pruning matching tombstones, reconciling a swap that locks after its negotiation was cancelled for timing out | Not done; listed in the architecture document's known gaps. `AGREEMENT_PENDING` itself now has a bounded sweeper and `dead_letter` keeps skipped events |
-| Enforcing that user ids never start with `system:` | Not done (token issuer); see the architecture document |
+| Enforcing that user ids never start with `system:` | Partly done: `tools/devtoken` refuses to mint such ids and the gateway denies such a `sub`; a real identity provider would have to enforce it too |
 | Recorded learnings (ADR notes) | Five drafts written ([outbox](../adr/drafts/use-a-transactional-outbox-for-events.md), [idempotent consumers](../adr/drafts/make-consumers-idempotent-with-a-processed-events-table.md), [ad lock](../adr/drafts/take-the-exclusive-ad-lock-in-the-ad-service.md), [Negotiation/Swap split](../adr/drafts/keep-negotiation-and-swap-as-separate-services.md), [versioned approvals](../adr/drafts/bind-approvals-to-versions.md)); none accepted yet |
+
+## Lessons learned from the MVP build
+
+Each point names where the evidence is in this repository. They are observations from one small build, not general rules.
+
+- **Windows `localhost` resolves to `::1` first.** Docker publishes Postgres and Kafka on `127.0.0.1` only, so every new physical connection from a .NET service paid a refused IPv6 connect: about 4.03 s against about 15 ms. It showed up as a mysterious 4 s outlier in latency and as 3.7 to 4.2 s outbox lag, and only in the .NET services. Fix: `127.0.0.1` everywhere ([load test results](../testing/load-test-results.md), "Unexplained 4 s stalls"; [running locally](../guidelines/running-locally.md)).
+- **A killed consumer keeps its place in the consumer group.** After killing a service the restarted instance waited up to the ~45 s session timeout for a rebalance (34 s in chaos scenario 1), and a client saw `AGREEMENT_PENDING` for that long. It looks like a hung saga but is not ([chaos test results](../testing/chaos-test-results.md), finding 1; failure-behavior table in the [architecture document](../architecture/mvp-architecture.md)).
+- **Outbox ordering needs `clock_timestamp()`.** `now()` is the transaction start, so events written in one transaction had equal `created_at` and no defined order; the relay now orders by `created_at, id` with rows inserted using `clock_timestamp()` (commit `a8745cd`; [service conventions](../guidelines/mvp-service-conventions.md), "Events").
+- **`GetAd` visibility fought with counterpart approvals.** A party must see the other side's ad to approve its version, but `GetAd` hides unpublished ads and old versions from non-owners. The answer was to embed `requester_ad` and `target_ad` in every `Negotiation` response, fetched as `system:negotiation` and shown only to the two parties (commit `43daf31`; [architecture](../architecture/mvp-architecture.md), "Counterpart visibility"), at the price of up to two extra synchronous calls per response (known gap 16).
+- **Unbounded lists broke the gateway.** Envoy answered 500 when a transcoded list response exceeded its buffer, and the response size grows with the data a user accumulates (the load-test users ended with hundreds of ads and thousands of negotiations and swaps). All three list endpoints became keyset-paginated (commit `2c17ad5`; [API conventions](../guidelines/api-conventions.md#pagination)).
+- **Pool limits must add up to the database limit.** With default pools, up to 100 concurrent callers exhausted Postgres `max_connections=100` (`53300`, 308 log lines) and surfaced as HTTP 500 instead of a clean 429. Bounded pools (`DB_MAX_CONNS=20`), `max_connections=200`, no connection held across a call to another service and an overload interceptor mapping the rest to `UNAVAILABLE` removed the 500s (contention test: 4 and 22 failed opens before, 0 after; [load test results](../testing/load-test-results.md), "After the fix").
+- **Separate permanent from transient consumer errors.** A consumer that retries forever turns one poison message into a blocked partition. Permanent failures (undecodable payload, a `LockAds` refusal) now go to `dead_letter` and the consumer moves on; transient ones still retry and block. The cost is a table nobody reads yet: no alerting, no replay tool (known gap 7).
+- **Order across topics needs more than a version check.** `AdReleased` re-publishes the same ad version after a lock, so matching could not tell a stale event from a legitimate one by version alone. A per-ad `seq` plus tombstones fixed it (commit `43daf31`; [architecture](../architecture/mvp-architecture.md), "Ordering with `seq`"). The same family: the final approval must re-check versions with the Ad service because the local `ad_ref` copy lags.
+- **Measure before explaining, and keep the caveats.** The first load sweep was discarded because the code changed under it; one run per setting was often 4x apart in an earlier discarded sweep; and the post-fix runs were on a wiped stack, so the before/after comparison is not one-to-one. Every headline number in the README carries the laptop, same-machine k6 and Development-mode caveats.
+- **Fault injection confirmed the design more than it found bugs, but needed its own care.** All 7 scenarios passed and no real bug was found, yet writing them corrected the harness at least once (for example waiting for the handler failure line before restarting Ad in scenario 2) and showed which claims could not be tested deterministically ([chaos test results](../testing/chaos-test-results.md), findings).
+- **Code written by subagents needed independent review.** Review passes were separate commits after the features: `616e0e6` (fix review findings), `43daf31` (harden saga and contracts) and `d78196d` (harden internal identity), which between them added the shared secret for `system:` callers, stale-lock-event handling, the `AGREEMENT_PENDING` republish sweeper and `dead_letter`. The repository does not record how many review findings were rejected, so no ratio is claimed here.

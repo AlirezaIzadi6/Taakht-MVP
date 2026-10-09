@@ -29,7 +29,7 @@ We will keep Negotiation and Swap as two services with separate databases. Negot
 
 - The boundary was chosen while building, not validated against the domain context map. The open decomposition item ([open items](../../open-items.md), item 3) still needs that confirmation.
 - The revisit trigger is a judgement: no measurement of change coupling exists.
-- No fault-injection test shows the behavior when one of the two is down; the failure table in the architecture document is derived from the code.
+- Fault injection ([chaos results](../../testing/chaos-test-results.md)) covers swap killed and restarted (scenario 1), negotiation killed with the agreement in its outbox (5) and a payment deadline passing while Ad was down (7); all passed. After a restart the consumer-group rebalance adds up to ~45 s before the other side sees progress. Not run: the `AGREEMENT_PENDING` republish sweeper and `ExclusiveLockAcquired` waiting while negotiation is down.
 
 ## Evidence
 

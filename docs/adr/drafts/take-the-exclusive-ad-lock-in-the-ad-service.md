@@ -34,7 +34,9 @@ We will take the lock in the Ad service, which owns the ad rows: `LockAds(swap_i
 - Negotiation consumes `SwapCancelled` and cancels the `AGREED` negotiation named by the event's `negotiation_id` (the ad pair is used only for events without that field). It acts on `ExclusiveLockAcquired` only for an existing `AGREEMENT_PENDING` or `AGREED` winner whose ads match the event. It does not consume `SwapCompleted`, so a completed swap leaves it `AGREED`. Competitors cancelled at lock time stay cancelled.
 - The caller check on `LockAds` requires `x-user-id: system:swap` together with the shared `INTERNAL_AUTH_TOKEN` (`x-internal-token`); a bare `system:swap` is `UNAUTHENTICATED`. It is one secret for all services, not a per-service cryptographic identity (see [authenticate service-to-service calls](authenticate-service-to-service-calls.md)).
 - Consistency between the lock and the search index is eventual: Matching removes an ad when `AdLocked` arrives, so a locked ad can briefly appear in `Search` results. A user acting on such a result is stopped at `OpenNegotiation` (the target must be published) or at `LockAds`.
-- Only overlapping swaps in one process were tested (concurrent goroutines); there is no multi-process load test.
+- Unit-level concurrency is tested in one process (concurrent goroutines). Across processes the race was exercised by `tests/load/contention.js` through the full stack (10 final approvals on one hot ad at the same instant, 40 to 200 requesters): in every run exactly one swap for the ad was not `REJECTED`/`CANCELLED` and the ad ended `CLOSED` ([load test results](../../testing/load-test-results.md)). One run per setting on one laptop.
+- Fault injection ([chaos results](../../testing/chaos-test-results.md), scenario 2): with Ad killed during the lock the swap stayed `LOCKING`, the handler was retried with backoff and `LockAds` succeeded once Ad was back. The exact crash window between the lock commit and the swap update was not injected.
+- The consumer dedupe transaction is open during the `LockAds` call (up to the 10 s timeout); see known gap 6 in the architecture document.
 
 ## Evidence
 

@@ -14,10 +14,13 @@ Environment (defaults shown):
 
 | Variable | Default |
 |---|---|
-| `DATABASE_URL` | `postgres://taakht:taakht@localhost:5432/ad?sslmode=disable` |
-| `KAFKA_BROKERS` | `localhost:9094` |
+| `DATABASE_URL` | `postgres://taakht:taakht@127.0.0.1:5432/ad?sslmode=disable` |
+| `KAFKA_BROKERS` | `127.0.0.1:9094` |
 | `GRPC_ADDR` | `:9001` |
 | `ELIGIBILITY_FILE` | `../../config/eligibility.json` |
+| `DB_MAX_CONNS` / `DB_MIN_CONNS` / `REQUEST_TIMEOUT` | `20` / `2` / `15s` |
+
+Shared settings (pool bounds `DB_MAX_CONNS` 20 / `DB_MIN_CONNS`, retention and prune settings, `INTERNAL_AUTH_TOKEN`) are described in [MVP service conventions](../../docs/guidelines/mvp-service-conventions.md). Use `127.0.0.1`, not `localhost`, for host-run services.
 
 Migrations in `migrations/` are embedded and applied at startup. gRPC reflection is off unless `TAAKHT_GRPC_REFLECTION=on` (scripts/dev.sh sets it). Every call needs the `x-user-id` metadata.
 
@@ -39,5 +42,5 @@ grpcurl -plaintext -H 'x-user-id: user-1' -d '{"spec":{"title":"Book","have_cate
 ```bash
 go vet ./... && go test -race ./...
 # Postgres-backed tests (create and drop a throwaway database per test):
-TEST_DATABASE_URL='postgres://taakht:taakht@localhost:5432/postgres?sslmode=disable' go test -race ./...
+TEST_DATABASE_URL='postgres://taakht:taakht@127.0.0.1:5432/postgres?sslmode=disable' go test -race ./...
 ```

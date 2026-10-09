@@ -8,7 +8,7 @@ Shared helpers for the .NET services (namespace `Taakht.Platform`). Solution: `T
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddTaakhtPlatform(builder.Configuration);   // NpgsqlDataSource (DATABASE_URL), KafkaOptions (KAFKA_BROKERS), interceptors
 builder.Services.AddGrpc(o => o.Interceptors.Add<ServerIdentityInterceptor>());
-builder.Services.AddGrpcClient<Ad.AdClient>(o => o.Address = new Uri(builder.Configuration["AD_ADDR"] ?? "http://localhost:9001"))
+builder.Services.AddGrpcClient<Ad.AdClient>(o => o.Address = new Uri(builder.Configuration["AD_ADDR"] ?? "http://127.0.0.1:9001"))
     .AddInterceptor<ClientIdentityInterceptor>();             // forwards x-user-id
 builder.Services.AddTaakhtOutboxRelay();
 builder.Services.AddTaakhtEventConsumer("swap", ["negotiation.events"],
@@ -25,7 +25,7 @@ await app.Services.MigrateAsync(typeof(Program).Assembly);   // embedded migrati
   sets the ambient `UserContext.Current`, which `ClientIdentityInterceptor` forwards. Background jobs: `using (UserContext.Use("system")) { ... }`.
 - Events: `await Outbox.AddAsync(conn, tx, "swap.events", swapId, new SwapCompleted {...}, ct)` in the same transaction as the business change.
   `Outbox.Wrap` builds the envelope only.
-- Tables: ship the `outbox` / `processed_events` DDL from the conventions doc in your own `migrations/001_init.sql`
+- Tables: ship the `outbox` / `processed_events` / `dead_letter` DDL from the conventions doc in your own `migrations/001_init.sql`
   (`PlatformSchema.OutboxDdl` / `ProcessedEventsDdl` hold the same text; `PlatformSchema.EnsureTablesAsync` is for tests).
 - Migrations: put `migrations/NNN_name.sql` in the service project, embed with `<EmbeddedResource Include="migrations/*.sql" />`.
   Applied in file-name order; version = file name without `.sql`; guarded by an advisory lock, each file in a transaction.

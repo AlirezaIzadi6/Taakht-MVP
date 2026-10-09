@@ -32,7 +32,7 @@ We will keep all services, the shared contracts (`api/`), the gateway configurat
 
 ## Known gaps
 
-- CI has never run on a real service: the repository has no `.sln` or `go.mod` yet, so service discovery, the path filters and the `ci-ok` skip logic are untested in practice. This decision relies on them.
+- The CI workflow (`.github/workflows/ci.yml`) now discovers the real solutions and modules (four services, two libraries, `tests/e2e`), and `make lint` / `make test` run per solution locally. The GitHub-hosted run history was not checked for this document; the `e2e` job is informational and not part of `ci-ok`.
 - The rule "services share only contracts" is not enforced by any tool; it relies on review.
 
 ## References

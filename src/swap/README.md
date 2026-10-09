@@ -14,11 +14,15 @@ Migrations are embedded and applied at startup (database `swap` must exist, as c
 
 | Variable | Default |
 |---|---|
-| `DATABASE_URL` | `postgres://taakht:taakht@localhost:5432/swap?sslmode=disable` |
-| `KAFKA_BROKERS` | `localhost:9094` |
+| `DATABASE_URL` | `postgres://taakht:taakht@127.0.0.1:5432/swap?sslmode=disable` |
+| `KAFKA_BROKERS` | `127.0.0.1:9094` |
 | `GRPC_ADDR` | `:9004` |
-| `AD_ADDR` | `localhost:9001` |
-| `PAYMENT_DEADLINE` | `1h` (accepts `30s`, `2m`, `1h`, `1h30m`) |
+| `AD_ADDR` | `127.0.0.1:9001` |
+| `PAYMENT_DEADLINE` | `1h` (accepts `30s`, `2m`, `1h`, `1h30m`); `scripts/dev.sh` exports `2m` |
+| `ENABLE_DEV_ENDPOINTS` | unset (the dev RPC `SimulateLockerFeePaid` is on in the Development environment or with `true`) |
+| `DB_MAX_CONNS` / `DB_MIN_CONNS` / `DB_ACQUIRE_TIMEOUT` | `20` / `5` / `10s` |
+
+Shared settings (pool bounds `DB_MAX_CONNS` 20 / `DB_MIN_CONNS`, retention and prune settings, `INTERNAL_AUTH_TOKEN`) are described in [MVP service conventions](../../docs/guidelines/mvp-service-conventions.md). Use `127.0.0.1`, not `localhost`, for host-run services.
 
 ```bash
 grpcurl -plaintext -H 'x-user-id: user-1' localhost:9004 taakht.swap.v1.SwapService/ListMySwaps
@@ -42,7 +46,7 @@ grpcurl -plaintext -H 'x-user-id: user-1' -d '{"swap_id":"<id>","user_id":"user-
 ```bash
 cd src/swap
 dotnet test                                     # state machine + parser tests; Postgres tests are skipped
-TEST_DATABASE_URL='postgres://taakht:taakht@localhost:5432/postgres?sslmode=disable' dotnet test
+TEST_DATABASE_URL='postgres://taakht:taakht@127.0.0.1:5432/postgres?sslmode=disable' dotnet test
 ```
 
 The Postgres tests create and drop a throwaway database on that server and use a fake `IAdClient`.

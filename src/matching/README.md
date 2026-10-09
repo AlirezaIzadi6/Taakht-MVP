@@ -10,7 +10,7 @@ cd src/matching
 go run .                     # gRPC on :9002
 ```
 
-Environment (defaults): `DATABASE_URL=postgres://taakht:taakht@localhost:5432/matching?sslmode=disable`, `KAFKA_BROKERS=localhost:9094`, `GRPC_ADDR=:9002`, `ELIGIBILITY_FILE=../../config/eligibility.json`. gRPC reflection is off unless `TAAKHT_GRPC_REFLECTION=on` (scripts/dev.sh sets it).
+Environment (defaults): `DATABASE_URL=postgres://taakht:taakht@127.0.0.1:5432/matching?sslmode=disable`, `KAFKA_BROKERS=127.0.0.1:9094`, `GRPC_ADDR=:9002`, `ELIGIBILITY_FILE=../../config/eligibility.json`. gRPC reflection is off unless `TAAKHT_GRPC_REFLECTION=on` (scripts/dev.sh sets it). Shared settings (pool bounds `DB_MAX_CONNS` 20 / `DB_MIN_CONNS`, retention and prune settings, `INTERNAL_AUTH_TOKEN`) are described in [MVP service conventions](../../docs/guidelines/mvp-service-conventions.md). Use `127.0.0.1`, not `localhost`, for host-run services. Pool defaults: `DB_MAX_CONNS=20`, `DB_MIN_CONNS=2`.
 
 Smoke test with fake ad events (service must be running): `go run ./cmd/fakead` publishes two matching `AdPublished` envelopes, then calls `Search` and `FindMatches`. The service logs `MATCH ...` and writes `MatchFound` to the outbox (topic `matching.events`).
 
@@ -28,5 +28,5 @@ Manual calls: `grpcurl -plaintext -H 'x-user-id: user-1' -d '{"criteria":{"want_
 
 ```bash
 go vet ./... && go test -race ./...
-TEST_DATABASE_URL=postgres://taakht:taakht@localhost:5432/postgres?sslmode=disable go test -race ./...   # adds Postgres tests (throwaway databases)
+TEST_DATABASE_URL=postgres://taakht:taakht@127.0.0.1:5432/postgres?sslmode=disable go test -race ./...   # adds Postgres tests (throwaway databases)
 ```

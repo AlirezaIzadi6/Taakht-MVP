@@ -74,14 +74,13 @@ Rule of thumb: mock an external dependency when it cannot realistically be built
 - **Async communication:** Apache Kafka, domain events published through a transactional outbox, consumed idempotently
 - **Storage:** PostgreSQL, one database per service, no cross-database access. Search in Matching is plain SQL
 - **Local infrastructure:** Docker Compose (Postgres, Kafka, Envoy); the services run as host processes
-- **Testing:** unit and integration tests per service, `tests/e2e` end-to-end tests, a narrated REST demo script
+- **Testing:** unit and integration tests per service, `tests/e2e` end-to-end tests, fault-injection scenarios (`make chaos`), k6 load tests (`tests/load`, `make load`) with recorded results, a narrated REST demo script
 
 **Planned in the full design, not used in the MVP**
 
 - Elasticsearch for search and match scoring, Redis for geo queries and sorting, Logstash and the rest of the observability stack
 - GraphQL as a possible complement to REST, rate limiting and load balancing at the gateway
-- Scripted load and stress tests with recorded results
-- `TBD:` locking beyond the single-node setup, real-time channel, service-to-service authentication (API keys proposed; see the ADR drafts), deployment topology and scaling approach
+- `TBD:` locking beyond the single-node setup, real-time channel, per-service service-to-service authentication (mTLS is the production target; see the ADR drafts), deployment topology and scaling approach
 
 ## Quick start
 
@@ -98,7 +97,7 @@ make dev-stop     # stop the services (infrastructure keeps running)
 make reset        # stop services and wipe all data, start a fresh infrastructure
 ```
 
-Other targets: `make dev-status`, `make scenario` (scripted gRPC scenario), `make fmt`, `make lint` (what CI runs), `make test` (all unit tests, Go with `-race`), `make down` (stop infrastructure and delete its data).
+Other targets: `make dev-status`, `make scenario` (scripted gRPC scenario), `make fmt`, `make lint` (what CI runs), `make test` (all unit tests, Go with `-race`), `make down` (stop infrastructure and delete its data). `make chaos` (fault injection, about 10 minutes, stops and starts services and containers) and `make load` (k6, needs `k6`) need the stack to be otherwise unused.
 
 Calling the API by hand through Envoy (`:8080`) with a dev token for a seeded user (`user-1` .. `user-4`):
 
@@ -130,11 +129,12 @@ Taakht/
 ├── deploy/          docker-compose.yml (Postgres, Kafka, Envoy) and DB init
 ├── config/          eligibility.json (categories, neighborhoods)
 ├── scripts/         dev.sh (start/stop services), demo.sh (REST demo)
-├── tests/e2e/       end-to-end tests and scenario runner (Go)
+├── tests/e2e/       end-to-end tests, fault-injection scenarios and scenario runner (Go)
+├── tests/load/      k6 load tests and recorded raw results
 ├── tools/devtoken/  dev JWT generator
 ├── third_party/     vendored proto dependencies (google/api annotations)
 ├── docs/            design documents (see Documentation below)
-├── Makefile         setup, dev, demo, e2e, fmt, lint, test
+├── Makefile         setup, dev, demo, e2e, chaos, load, fmt, lint, test
 ├── lefthook.yml     git hooks (pre-commit fixes, Conventional Commits check)
 └── .github/         CI
 ```
@@ -154,9 +154,10 @@ Each .NET service has its own solution file and each Go service its own module. 
 What the one-week MVP contains, in more detail in [MVP architecture](docs/architecture/mvp-architecture.md) and [MVP plan](docs/product/mvp-plan.md):
 
 - **Built and running:** the four services with a database each; gRPC between them (`GetAd`, `LockAds`); Kafka events through a transactional outbox with idempotent consumers; the atomic exclusive lock in the Ad service; versioned approvals; the lock saga with a locker-fee deadline and compensation; Envoy with JWT validation and REST transcoding; seeded users and a dev token tool.
-- **Verified by:** unit and integration tests per service and library, `tests/e2e` (happy path, payment timeout, lock race, locker eligibility; run against the live stack), and `scripts/demo.sh` (a recorded run is in the demo walkthrough).
+- **Verified by:** unit and integration tests per service and library (Go: 10 packages with tests across `libs/goplatform`, `src/ad` and `src/matching`; .NET: Platform 114, Negotiation 80, Swap 65 tests), `tests/e2e` (happy path, payment timeout, lock race, locker eligibility; run against the live stack), `scripts/demo.sh` (a recorded run is in the demo walkthrough), 7 fault-injection scenarios that all passed ([chaos test results](docs/testing/chaos-test-results.md)) and k6 load tests ([load test results](docs/testing/load-test-results.md)).
+- **Load test headline (measured 2026-10-09, one run per setting):** the read path (`browse.js`) held p95 under 25 ms with 0% errors up to 200 virtual users (1,540.2 req/s, p95 16.2 ms), with the knee around 400 VUs (2,389.0 req/s, p95 87.3 ms) and a peak of 2,578.2 req/s at 800 VUs (p95 274.1 ms). The full write path (`negotiate.js`, publish, negotiate, agree, lock, close) completed every iteration up to 40 VUs (438.3 req/s, `time_to_ads_closed` p95 1,564 ms on the first sweep). After the pool and overload fixes, 160 VUs completed 943 of 943 iterations, while at 320 VUs only 107 of 995 iterations saw `AGREED` within 30 s: the asynchronous chain is the limit under heavy load. Hot-ad contention: exactly 10 negotiations (the cap) and exactly one swap not rejected or cancelled in every run. Caveats: a single Windows laptop, k6 on the same machine as the system under test, services in Development mode, no tuning, single runs, and the post-fix runs were on a wiped stack, so they are not comparable one-to-one with the first sweep. These numbers say nothing about production scale.
 - **Mocked or cut** (list in the plan): Communication, Reputation, KYC, Report, locker partner (mocked in Swap), pricing, hotspots, TTL expiry, item-condition claims, Elasticsearch, Redis, Logstash.
-- **Not done:** load test results (no throughput or latency numbers exist), fault-injection tests (Kafka or a service down mid-saga), containerized deployment of the services, a real identity provider, service-to-service authentication, repair of a swap stuck in `LOCKING`, a replay tool for the `dead_letter` table.
+- **Not done:** fault-injection scenarios beyond the seven recorded (matching down, the `AGREEMENT_PENDING` republish sweeper, a Kafka outage longer than the consumer session timeout, a crash between the Kafka produce and `published_at`), containerized deployment of the services, a real identity provider, per-service service-to-service authentication, repair of a swap stuck in `LOCKING`, a replay tool for the `dead_letter` table.
 
 ## Status and known limitations
 
@@ -168,8 +169,8 @@ Known and intentional for the current phase:
 - The platform does not arbitrate item-condition disputes; it only records and forwards claims.
 - Informal competitors (Telegram/Instagram swap groups, global swap apps) have not been analyzed yet.
 - The system runs on a single node (one Postgres instance, one Kafka node, services as host processes); there is no fault tolerance against the loss of a node or of infrastructure components.
-- Services do not authenticate each other in this phase: the internal network is isolated and only the gateway should be reachable by clients, so it must not be exposed beyond the gateway. The `system:swap` / `system:negotiation` identities are plain strings in `x-user-id`, and the gateway uses a committed dev signing key. Production target is mutual TLS between services and a real identity provider.
-- No performance numbers: nothing has been load tested.
+- Services do not have a per-service identity in this phase: the `system:swap` / `system:negotiation` identities are accepted only together with one shared secret (`INTERNAL_AUTH_TOKEN`, public dev default `dev-internal-token`, no rotation, plaintext gRPC), and ordinary user ids are believed as sent in `x-user-id`. The internal network is isolated and only the gateway should be reachable by clients, so it must not be exposed beyond the gateway; the gateway uses a committed dev signing key. Production target is mutual TLS between services and a real identity provider.
+- Performance numbers exist only from the k6 runs recorded in [load test results](docs/testing/load-test-results.md): one laptop, k6 on the same machine, Development mode, single runs. Nothing is extrapolated to production scale.
 
 Weaknesses found in the code are listed under [Known gaps](docs/architecture/mvp-architecture.md#known-gaps) in the MVP architecture document.
 
@@ -193,7 +194,7 @@ Weaknesses found in the code are listed under [Known gaps](docs/architecture/mvp
 | [`docs/evidence/`](docs/evidence) | Experiments and reviews behind ADRs |
 | [`docs/guidelines/`](docs/guidelines) | [Running locally](docs/guidelines/running-locally.md), [API conventions](docs/guidelines/api-conventions.md), [MVP service conventions](docs/guidelines/mvp-service-conventions.md) |
 | [`docs/api/`](docs/api) | API documentation and event contracts (not written yet; the contracts are in `api/proto`) |
-| [`docs/testing/`](docs/testing) | Test strategy and load/chaos results, when they exist |
+| [`docs/testing/`](docs/testing) | Recorded [load test results](docs/testing/load-test-results.md) and [chaos (fault-injection) results](docs/testing/chaos-test-results.md); a separate test strategy is not written |
 | [`docs/process/`](docs/process) | How the team works (not written yet) |
 | [`docs/get-started.md`](docs/get-started.md) | Developer onboarding |
 | [`docs/open-items.md`](docs/open-items.md) | Undecided questions that feed new ADRs |

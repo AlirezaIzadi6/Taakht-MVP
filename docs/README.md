@@ -13,7 +13,7 @@ Entry point for all Taakht design documents. The root [README](../README.md) is 
 | `evidence/` | Experiments and document reviews behind ADRs, with results and what was not verified | The decision itself |
 | `guidelines/` | Conventions that follow from decisions: [running locally](guidelines/running-locally.md), [API conventions](guidelines/api-conventions.md), [MVP service conventions](guidelines/mvp-service-conventions.md); later topic naming, retry/DLQ patterns, code style | Decisions with trade-offs |
 | `api/` | API documentation (OpenAPI, Postman) and event contracts | Internal design |
-| `testing/` | Test strategy, load and stress test scenarios and recorded results (the scripts themselves live with the code). Empty until results exist; the functional tests are described in [mvp-plan.md](product/mvp-plan.md) and [mvp-architecture.md](architecture/mvp-architecture.md) | Unit test code |
+| `testing/` | Test strategy, load and fault-injection results (the scripts themselves live with the code: `tests/load`, `tests/e2e`). Holds [load-test-results.md](testing/load-test-results.md) and [chaos-test-results.md](testing/chaos-test-results.md); a separate test strategy is not written, the functional tests are described in [mvp-plan.md](product/mvp-plan.md) and [mvp-architecture.md](architecture/mvp-architecture.md) | Unit test code |
 | `process/` | How the team works: Scrum, GitHub workflow, meetings | Architecture |
 | `get-started.md` | Developer onboarding: prerequisites, setup, everyday commands, git hooks, CI, troubleshooting | Architecture, conventions that follow from decisions |
 | `open-items.md` | Undecided questions and remaining steps, the working list that feeds new ADRs | Decided material |

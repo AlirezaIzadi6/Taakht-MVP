@@ -30,11 +30,13 @@ We will write every event into an `outbox` table in the same database transactio
 
 ## Known gaps
 
-- `outbox` rows are never deleted.
+- Published rows are deleted only after `OUTBOX_RETENTION` (24h), so the table holds a day of history; unpublished rows are never deleted and nothing alerts if they pile up.
 - Order is guaranteed per Kafka key (the aggregate id) from one relay. With several relay instances, `SKIP LOCKED` lets them publish different batches concurrently and global order is not guaranteed. The MVP runs one instance per service.
 - A crash after the broker acknowledgement and before `published_at` is committed publishes the batch again.
 - When Kafka is down, the Go and .NET relays log the failure and retry on the next poll. Nothing alerts on a growing backlog.
-- No latency or throughput was measured.
+- Measured only on one laptop ([load test results](../../testing/load-test-results.md)): outbox lag (`published_at - created_at`) over the runs on a wiped stack was at most 1.06 s (negotiation), 0.40 s (swap), 0.26 s (ad), 0.30 s (matching). Before the fix for the Windows `localhost` stall, .NET services showed 3.7 to 4.2 s lags.
+- Ordering bug found while building: `created_at DEFAULT now()` is the transaction start, so events of one transaction had equal timestamps and no order; inserting with `clock_timestamp()` plus `id` as tie-breaker fixed it.
+- Fault injection ([chaos results](../../testing/chaos-test-results.md), scenarios 3 and 5): with Kafka stopped for 15 s, or the producer killed with the agreement still in its outbox, the row stayed unpublished and the flow completed after restart. Not run: a crash between the broker acknowledgement and `published_at`.
 
 ## Evidence
 

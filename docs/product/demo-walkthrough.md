@@ -33,7 +33,7 @@ scripts/demo.sh --no-color       # plain output (also automatic when piped)
 make demo                        # same as scripts/demo.sh; DEMO_ARGS="--pause" or DEMO_ARGS=timeout
 ```
 
-Timeout variant (the swap needs a short payment deadline; the default is 2 minutes):
+Timeout variant (the swap needs a short payment deadline; the `scripts/dev.sh` default is 2 minutes, the swap service's own default is 1 hour):
 
 ```bash
 PAYMENT_DEADLINE=20s scripts/dev.sh restart swap

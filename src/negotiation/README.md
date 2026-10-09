@@ -17,7 +17,7 @@
 ```bash
 make up                       # Postgres + Kafka (repo root)
 cd src/negotiation/Taakht.Negotiation
-DATABASE_URL='postgres://taakht:taakht@localhost:5432/negotiation?sslmode=disable' dotnet run
+DATABASE_URL='postgres://taakht:taakht@127.0.0.1:5432/negotiation?sslmode=disable' dotnet run
 ```
 
 The `negotiation` database must exist (compose creates it). `dotnet run` uses the Development profile, so gRPC reflection is on:
@@ -30,17 +30,21 @@ grpcurl -plaintext -H 'x-user-id: user-1' -d '{"requester_ad_id":"...","target_a
 
 | Variable | Default |
 |---|---|
-| `DATABASE_URL` | `postgres://taakht:taakht@localhost:5432/postgres?sslmode=disable` (set it to the `negotiation` database) |
-| `KAFKA_BROKERS` | `localhost:9094` |
+| `DATABASE_URL` | `postgres://taakht:taakht@127.0.0.1:5432/postgres?sslmode=disable` (set it to the `negotiation` database) |
+| `KAFKA_BROKERS` | `127.0.0.1:9094` |
 | `GRPC_ADDR` | `:9003` |
-| `AD_ADDR` | `localhost:9001` |
+| `AD_ADDR` | `127.0.0.1:9001` |
 | `NEGOTIATION_CAP` | `10` open negotiations per ad (inbound + outbound) |
+| `AGREEMENT_PENDING_TIMEOUT` | `10m` (min `10s`, max `30d`) |
+| `DB_MAX_CONNS` / `DB_MIN_CONNS` / `DB_ACQUIRE_TIMEOUT` | `20` / `5` / `10s` |
+
+Shared settings (pool bounds `DB_MAX_CONNS` 20 / `DB_MIN_CONNS`, retention and prune settings, `INTERNAL_AUTH_TOKEN`) are described in [MVP service conventions](../../docs/guidelines/mvp-service-conventions.md). Use `127.0.0.1`, not `localhost`, for host-run services.
 
 ## Test
 
 ```bash
 dotnet test Negotiation.slnx                       # domain tests; Postgres tests skip themselves
-TEST_DATABASE_URL='postgres://taakht:taakht@localhost:5432/postgres?sslmode=disable' dotnet test Negotiation.slnx
+TEST_DATABASE_URL='postgres://taakht:taakht@127.0.0.1:5432/postgres?sslmode=disable' dotnet test Negotiation.slnx
 ```
 
 With `TEST_DATABASE_URL` set, the tests create a throwaway database on that server (and drop it afterwards) and use a fake `IAdClient`: approval flow, final sync check, the cap under 20 parallel `OpenNegotiation` calls, and the swap-event handlers.
