@@ -73,7 +73,8 @@ service AdService {
       get: "/v1/ads/{ad_id}"
     };
   }
-  rpc ListMyAds(google.protobuf.Empty) returns (ListMyAdsResponse) {
+  // The caller's own ads, newest first, one page at a time.
+  rpc ListMyAds(ListMyAdsRequest) returns (ListMyAdsResponse) {
     option (google.api.http) = {
       get: "/v1/ads"
     };
@@ -99,8 +100,16 @@ message GetAdRequest {
   // 0 = current version.
   int32 version = 2;
 }
+message ListMyAdsRequest {
+  // Page size: <= 0 means 50, values above 200 are clamped to 200.
+  int32 page_size = 1;
+  // Opaque cursor from a previous response's next_page_token; empty = first page. INVALID_ARGUMENT if malformed.
+  string page_token = 2;
+}
 message ListMyAdsResponse {
   repeated Ad ads = 1;
+  // Empty when there is no further page.
+  string next_page_token = 2;
 }
 
 message AdRef {

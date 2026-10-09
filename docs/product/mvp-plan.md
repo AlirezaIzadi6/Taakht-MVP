@@ -99,6 +99,8 @@ If steps 1-5 and 7 run from one script, the MVP is done. Step 6 is the first thi
 
 ## Status (2026-10-09)
 
+Update: `ListMyAds`, `ListMySwaps` and `ListNegotiations` are now bounded and keyset-paginated (`pageSize` default 50, max 200, `pageToken` / `nextPageToken`); see [API conventions](../guidelines/api-conventions.md#pagination).
+
 What exists is described in [MVP architecture](../architecture/mvp-architecture.md), which also lists where the code differs from this plan and the remaining gaps. The [demo walkthrough](demo-walkthrough.md) shows the REST scenario; [Running locally](../guidelines/running-locally.md) shows how to start the stack.
 
 ### Built and verified

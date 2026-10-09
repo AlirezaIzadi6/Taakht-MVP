@@ -11,7 +11,6 @@ import (
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -307,16 +306,72 @@ func (x *SwapIdRequest) GetSwapId() string {
 	return ""
 }
 
+type ListMySwapsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Page size: <= 0 means 50, values above 200 are clamped to 200.
+	PageSize int32 `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// Opaque cursor from a previous response's next_page_token; empty = first page. INVALID_ARGUMENT if malformed.
+	PageToken     string `protobuf:"bytes,2,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMySwapsRequest) Reset() {
+	*x = ListMySwapsRequest{}
+	mi := &file_taakht_swap_v1_swap_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMySwapsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMySwapsRequest) ProtoMessage() {}
+
+func (x *ListMySwapsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_taakht_swap_v1_swap_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMySwapsRequest.ProtoReflect.Descriptor instead.
+func (*ListMySwapsRequest) Descriptor() ([]byte, []int) {
+	return file_taakht_swap_v1_swap_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ListMySwapsRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListMySwapsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
 type ListMySwapsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Swaps         []*Swap                `protobuf:"bytes,1,rep,name=swaps,proto3" json:"swaps,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Swaps []*Swap                `protobuf:"bytes,1,rep,name=swaps,proto3" json:"swaps,omitempty"`
+	// Empty when there is no further page.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListMySwapsResponse) Reset() {
 	*x = ListMySwapsResponse{}
-	mi := &file_taakht_swap_v1_swap_proto_msgTypes[3]
+	mi := &file_taakht_swap_v1_swap_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -328,7 +383,7 @@ func (x *ListMySwapsResponse) String() string {
 func (*ListMySwapsResponse) ProtoMessage() {}
 
 func (x *ListMySwapsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_taakht_swap_v1_swap_proto_msgTypes[3]
+	mi := &file_taakht_swap_v1_swap_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -341,7 +396,7 @@ func (x *ListMySwapsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMySwapsResponse.ProtoReflect.Descriptor instead.
 func (*ListMySwapsResponse) Descriptor() ([]byte, []int) {
-	return file_taakht_swap_v1_swap_proto_rawDescGZIP(), []int{3}
+	return file_taakht_swap_v1_swap_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListMySwapsResponse) GetSwaps() []*Swap {
@@ -349,6 +404,13 @@ func (x *ListMySwapsResponse) GetSwaps() []*Swap {
 		return x.Swaps
 	}
 	return nil
+}
+
+func (x *ListMySwapsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
 }
 
 type SimulateLockerFeePaidRequest struct {
@@ -361,7 +423,7 @@ type SimulateLockerFeePaidRequest struct {
 
 func (x *SimulateLockerFeePaidRequest) Reset() {
 	*x = SimulateLockerFeePaidRequest{}
-	mi := &file_taakht_swap_v1_swap_proto_msgTypes[4]
+	mi := &file_taakht_swap_v1_swap_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -373,7 +435,7 @@ func (x *SimulateLockerFeePaidRequest) String() string {
 func (*SimulateLockerFeePaidRequest) ProtoMessage() {}
 
 func (x *SimulateLockerFeePaidRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_taakht_swap_v1_swap_proto_msgTypes[4]
+	mi := &file_taakht_swap_v1_swap_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -386,7 +448,7 @@ func (x *SimulateLockerFeePaidRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SimulateLockerFeePaidRequest.ProtoReflect.Descriptor instead.
 func (*SimulateLockerFeePaidRequest) Descriptor() ([]byte, []int) {
-	return file_taakht_swap_v1_swap_proto_rawDescGZIP(), []int{4}
+	return file_taakht_swap_v1_swap_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SimulateLockerFeePaidRequest) GetSwapId() string {
@@ -407,7 +469,7 @@ var File_taakht_swap_v1_swap_proto protoreflect.FileDescriptor
 
 const file_taakht_swap_v1_swap_proto_rawDesc = "" +
 	"\n" +
-	"\x19taakht/swap/v1/swap.proto\x12\x0etaakht.swap.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'taakht/negotiation/v1/negotiation.proto\"\x83\x01\n" +
+	"\x19taakht/swap/v1/swap.proto\x12\x0etaakht.swap.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'taakht/negotiation/v1/negotiation.proto\"\x83\x01\n" +
 	"\x03Leg\x12\"\n" +
 	"\rowner_user_id\x18\x01 \x01(\tR\vownerUserId\x12=\n" +
 	"\x06method\x18\x02 \x01(\x0e2%.taakht.negotiation.v1.DeliveryMethodR\x06method\x12\x19\n" +
@@ -426,9 +488,14 @@ const file_taakht_swap_v1_swap_proto_rawDesc = "" +
 	"created_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"(\n" +
 	"\rSwapIdRequest\x12\x17\n" +
-	"\aswap_id\x18\x01 \x01(\tR\x06swapId\"A\n" +
+	"\aswap_id\x18\x01 \x01(\tR\x06swapId\"P\n" +
+	"\x12ListMySwapsRequest\x12\x1b\n" +
+	"\tpage_size\x18\x01 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x02 \x01(\tR\tpageToken\"i\n" +
 	"\x13ListMySwapsResponse\x12*\n" +
-	"\x05swaps\x18\x01 \x03(\v2\x14.taakht.swap.v1.SwapR\x05swaps\"P\n" +
+	"\x05swaps\x18\x01 \x03(\v2\x14.taakht.swap.v1.SwapR\x05swaps\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"P\n" +
 	"\x1cSimulateLockerFeePaidRequest\x12\x17\n" +
 	"\aswap_id\x18\x01 \x01(\tR\x06swapId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId*\xb4\x01\n" +
@@ -439,10 +506,10 @@ const file_taakht_swap_v1_swap_proto_rawDesc = "" +
 	"\x14SWAP_STATUS_REJECTED\x10\x02\x12 \n" +
 	"\x1cSWAP_STATUS_AWAITING_PAYMENT\x10\x03\x12\x19\n" +
 	"\x15SWAP_STATUS_COMPLETED\x10\x04\x12\x19\n" +
-	"\x15SWAP_STATUS_CANCELLED\x10\x052\xe4\x02\n" +
+	"\x15SWAP_STATUS_CANCELLED\x10\x052\xf0\x02\n" +
 	"\vSwapService\x12[\n" +
-	"\aGetSwap\x12\x1d.taakht.swap.v1.SwapIdRequest\x1a\x14.taakht.swap.v1.Swap\"\x1b\x82\xd3\xe4\x93\x02\x15\x12\x13/v1/swaps/{swap_id}\x12]\n" +
-	"\vListMySwaps\x12\x16.google.protobuf.Empty\x1a#.taakht.swap.v1.ListMySwapsResponse\"\x11\x82\xd3\xe4\x93\x02\v\x12\t/v1/swaps\x12\x98\x01\n" +
+	"\aGetSwap\x12\x1d.taakht.swap.v1.SwapIdRequest\x1a\x14.taakht.swap.v1.Swap\"\x1b\x82\xd3\xe4\x93\x02\x15\x12\x13/v1/swaps/{swap_id}\x12i\n" +
+	"\vListMySwaps\x12\".taakht.swap.v1.ListMySwapsRequest\x1a#.taakht.swap.v1.ListMySwapsResponse\"\x11\x82\xd3\xe4\x93\x02\v\x12\t/v1/swaps\x12\x98\x01\n" +
 	"\x15SimulateLockerFeePaid\x12,.taakht.swap.v1.SimulateLockerFeePaidRequest\x1a\x14.taakht.swap.v1.Swap\";\x82\xd3\xe4\x93\x025:\x01*\"0/v1/dev/swaps/{swap_id}/locker-fee-paid:simulateBEZ2github.com/taakht/taakht/gen/taakht/swap/v1;swapv1\xaa\x02\x0eTaakht.Swap.V1b\x06proto3"
 
 var (
@@ -458,31 +525,31 @@ func file_taakht_swap_v1_swap_proto_rawDescGZIP() []byte {
 }
 
 var file_taakht_swap_v1_swap_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_taakht_swap_v1_swap_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_taakht_swap_v1_swap_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_taakht_swap_v1_swap_proto_goTypes = []any{
 	(SwapStatus)(0),                      // 0: taakht.swap.v1.SwapStatus
 	(*Leg)(nil),                          // 1: taakht.swap.v1.Leg
 	(*Swap)(nil),                         // 2: taakht.swap.v1.Swap
 	(*SwapIdRequest)(nil),                // 3: taakht.swap.v1.SwapIdRequest
-	(*ListMySwapsResponse)(nil),          // 4: taakht.swap.v1.ListMySwapsResponse
-	(*SimulateLockerFeePaidRequest)(nil), // 5: taakht.swap.v1.SimulateLockerFeePaidRequest
-	(v1.DeliveryMethod)(0),               // 6: taakht.negotiation.v1.DeliveryMethod
-	(*timestamppb.Timestamp)(nil),        // 7: google.protobuf.Timestamp
-	(*emptypb.Empty)(nil),                // 8: google.protobuf.Empty
+	(*ListMySwapsRequest)(nil),           // 4: taakht.swap.v1.ListMySwapsRequest
+	(*ListMySwapsResponse)(nil),          // 5: taakht.swap.v1.ListMySwapsResponse
+	(*SimulateLockerFeePaidRequest)(nil), // 6: taakht.swap.v1.SimulateLockerFeePaidRequest
+	(v1.DeliveryMethod)(0),               // 7: taakht.negotiation.v1.DeliveryMethod
+	(*timestamppb.Timestamp)(nil),        // 8: google.protobuf.Timestamp
 }
 var file_taakht_swap_v1_swap_proto_depIdxs = []int32{
-	6,  // 0: taakht.swap.v1.Leg.method:type_name -> taakht.negotiation.v1.DeliveryMethod
+	7,  // 0: taakht.swap.v1.Leg.method:type_name -> taakht.negotiation.v1.DeliveryMethod
 	0,  // 1: taakht.swap.v1.Swap.status:type_name -> taakht.swap.v1.SwapStatus
 	1,  // 2: taakht.swap.v1.Swap.leg_a:type_name -> taakht.swap.v1.Leg
 	1,  // 3: taakht.swap.v1.Swap.leg_b:type_name -> taakht.swap.v1.Leg
-	7,  // 4: taakht.swap.v1.Swap.payment_deadline:type_name -> google.protobuf.Timestamp
-	7,  // 5: taakht.swap.v1.Swap.created_at:type_name -> google.protobuf.Timestamp
+	8,  // 4: taakht.swap.v1.Swap.payment_deadline:type_name -> google.protobuf.Timestamp
+	8,  // 5: taakht.swap.v1.Swap.created_at:type_name -> google.protobuf.Timestamp
 	2,  // 6: taakht.swap.v1.ListMySwapsResponse.swaps:type_name -> taakht.swap.v1.Swap
 	3,  // 7: taakht.swap.v1.SwapService.GetSwap:input_type -> taakht.swap.v1.SwapIdRequest
-	8,  // 8: taakht.swap.v1.SwapService.ListMySwaps:input_type -> google.protobuf.Empty
-	5,  // 9: taakht.swap.v1.SwapService.SimulateLockerFeePaid:input_type -> taakht.swap.v1.SimulateLockerFeePaidRequest
+	4,  // 8: taakht.swap.v1.SwapService.ListMySwaps:input_type -> taakht.swap.v1.ListMySwapsRequest
+	6,  // 9: taakht.swap.v1.SwapService.SimulateLockerFeePaid:input_type -> taakht.swap.v1.SimulateLockerFeePaidRequest
 	2,  // 10: taakht.swap.v1.SwapService.GetSwap:output_type -> taakht.swap.v1.Swap
-	4,  // 11: taakht.swap.v1.SwapService.ListMySwaps:output_type -> taakht.swap.v1.ListMySwapsResponse
+	5,  // 11: taakht.swap.v1.SwapService.ListMySwaps:output_type -> taakht.swap.v1.ListMySwapsResponse
 	2,  // 12: taakht.swap.v1.SwapService.SimulateLockerFeePaid:output_type -> taakht.swap.v1.Swap
 	10, // [10:13] is the sub-list for method output_type
 	7,  // [7:10] is the sub-list for method input_type
@@ -502,7 +569,7 @@ func file_taakht_swap_v1_swap_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_taakht_swap_v1_swap_proto_rawDesc), len(file_taakht_swap_v1_swap_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

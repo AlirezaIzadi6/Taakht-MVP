@@ -11,7 +11,6 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -30,7 +29,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SwapServiceClient interface {
 	GetSwap(ctx context.Context, in *SwapIdRequest, opts ...grpc.CallOption) (*Swap, error)
-	ListMySwaps(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListMySwapsResponse, error)
+	// The caller's swaps, newest first, one page at a time.
+	ListMySwaps(ctx context.Context, in *ListMySwapsRequest, opts ...grpc.CallOption) (*ListMySwapsResponse, error)
 	// MOCK of the locker partner webhook (LockerFeePaid). Dev only.
 	SimulateLockerFeePaid(ctx context.Context, in *SimulateLockerFeePaidRequest, opts ...grpc.CallOption) (*Swap, error)
 }
@@ -53,7 +53,7 @@ func (c *swapServiceClient) GetSwap(ctx context.Context, in *SwapIdRequest, opts
 	return out, nil
 }
 
-func (c *swapServiceClient) ListMySwaps(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListMySwapsResponse, error) {
+func (c *swapServiceClient) ListMySwaps(ctx context.Context, in *ListMySwapsRequest, opts ...grpc.CallOption) (*ListMySwapsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListMySwapsResponse)
 	err := c.cc.Invoke(ctx, SwapService_ListMySwaps_FullMethodName, in, out, cOpts...)
@@ -78,7 +78,8 @@ func (c *swapServiceClient) SimulateLockerFeePaid(ctx context.Context, in *Simul
 // for forward compatibility.
 type SwapServiceServer interface {
 	GetSwap(context.Context, *SwapIdRequest) (*Swap, error)
-	ListMySwaps(context.Context, *emptypb.Empty) (*ListMySwapsResponse, error)
+	// The caller's swaps, newest first, one page at a time.
+	ListMySwaps(context.Context, *ListMySwapsRequest) (*ListMySwapsResponse, error)
 	// MOCK of the locker partner webhook (LockerFeePaid). Dev only.
 	SimulateLockerFeePaid(context.Context, *SimulateLockerFeePaidRequest) (*Swap, error)
 	mustEmbedUnimplementedSwapServiceServer()
@@ -94,7 +95,7 @@ type UnimplementedSwapServiceServer struct{}
 func (UnimplementedSwapServiceServer) GetSwap(context.Context, *SwapIdRequest) (*Swap, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSwap not implemented")
 }
-func (UnimplementedSwapServiceServer) ListMySwaps(context.Context, *emptypb.Empty) (*ListMySwapsResponse, error) {
+func (UnimplementedSwapServiceServer) ListMySwaps(context.Context, *ListMySwapsRequest) (*ListMySwapsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListMySwaps not implemented")
 }
 func (UnimplementedSwapServiceServer) SimulateLockerFeePaid(context.Context, *SimulateLockerFeePaidRequest) (*Swap, error) {
@@ -140,7 +141,7 @@ func _SwapService_GetSwap_Handler(srv interface{}, ctx context.Context, dec func
 }
 
 func _SwapService_ListMySwaps_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
+	in := new(ListMySwapsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -152,7 +153,7 @@ func _SwapService_ListMySwaps_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: SwapService_ListMySwaps_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwapServiceServer).ListMySwaps(ctx, req.(*emptypb.Empty))
+		return srv.(SwapServiceServer).ListMySwaps(ctx, req.(*ListMySwapsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

@@ -39,9 +39,9 @@ public sealed class NegotiationGrpcService(NegotiationService service) : NegV1.N
 
     public override async Task<NegV1.ListNegotiationsResponse> ListNegotiations(NegV1.ListNegotiationsRequest request, ServerCallContext context)
     {
-        var views = await service.ListAsync(CurrentUser.Id(context), request.AdId, context.CancellationToken);
-        var response = new NegV1.ListNegotiationsResponse();
-        response.Negotiations.AddRange(views.Select(Mapper.ToProto));
+        var page = await service.ListAsync(CurrentUser.Id(context), request.AdId, request.PageSize, request.PageToken, context.CancellationToken);
+        var response = new NegV1.ListNegotiationsResponse { NextPageToken = page.NextPageToken };
+        response.Negotiations.AddRange(page.Items.Select(Mapper.ToProto));
         return response;
     }
 

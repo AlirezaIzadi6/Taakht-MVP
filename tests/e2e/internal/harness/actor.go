@@ -12,7 +12,6 @@ import (
 	matchingv1 "github.com/taakht/taakht/gen/taakht/matching/v1"
 	negotiationv1 "github.com/taakht/taakht/gen/taakht/negotiation/v1"
 	swapv1 "github.com/taakht/taakht/gen/taakht/swap/v1"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const (
@@ -272,17 +271,27 @@ func Approval(n *negotiationv1.Negotiation, userID string, kind negotiationv1.Ap
 	return nil
 }
 
+// maxListPages bounds how many list pages a harness helper walks.
+const maxListPages = 50
+
 // SwapFor returns the actor's swap of a negotiation, or nil when none exists yet.
 func (a *Actor) SwapFor(negID string) (*swapv1.Swap, error) {
 	ctx, cancel := a.Ctx()
 	defer cancel()
-	resp, err := a.C.Swap.ListMySwaps(ctx, &emptypb.Empty{})
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range resp.GetSwaps() {
-		if s.GetNegotiationId() == negID {
-			return s, nil
+	// Newest first, so a fresh swap is on the first page; follow the tokens anyway for users with long histories.
+	token := ""
+	for pages := 0; pages < maxListPages; pages++ {
+		resp, err := a.C.Swap.ListMySwaps(ctx, &swapv1.ListMySwapsRequest{PageSize: 200, PageToken: token})
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range resp.GetSwaps() {
+			if s.GetNegotiationId() == negID {
+				return s, nil
+			}
+		}
+		if token = resp.GetNextPageToken(); token == "" {
+			break
 		}
 	}
 	return nil, nil

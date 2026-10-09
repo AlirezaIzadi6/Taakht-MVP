@@ -19,6 +19,16 @@ Conventions that follow from the Protobuf API contract decision. Not an ADR; che
 - Only RPCs with a `google.api.http` annotation are public; Envoy auto-mapping stays disabled.
 - Each service owns one path prefix at the edge.
 
+## Pagination
+
+List endpoints (`ListMyAds` `GET /v1/ads`, `ListNegotiations` `GET /v1/negotiations`, `ListMySwaps` `GET /v1/swaps`) are bounded and keyset-paginated. An unbounded list is unsafe at the edge: Envoy answers 500 when the transcoded response exceeds its buffer.
+
+- Request: `page_size` (`pageSize` in the query; `<= 0` means 50, above 200 is clamped to 200) and `page_token` (`pageToken`; empty = first page).
+- Response: the items plus `next_page_token` (`nextPageToken`), empty on the last page. Follow it until it is empty; the page may hold fewer items than requested only on the last page.
+- Order is newest first (`created_at DESC`, then `id DESC` as the deterministic tie-breaker). The token is opaque: base64url of `created_at|id` of the last item returned (UTC, microseconds). Do not build or parse it; a malformed token is `INVALID_ARGUMENT` (HTTP 400).
+- Implemented as `WHERE (created_at, id) < (cursor)` with `LIMIT page_size + 1` (the extra row only tells whether a next page exists), never `OFFSET`. Items created after the first page was read are newer than the cursor and are not part of that walk, so no item older than the cursor is duplicated or skipped; a new item shows only on a fresh first page.
+- `ListNegotiations` keeps its `adId` filter on every page, and fills `requesterAd` / `targetAd` only for the returned page.
+
 ### Path and verb conventions
 
 - Resources are plural nouns under `/v1/`: `/v1/ads/{ad_id}`. The collection path lists (`GET /v1/ads` = the caller's own ads), `POST` on it creates.
@@ -36,10 +46,10 @@ Conventions that follow from the Protobuf API contract decision. Not an ADR; che
 
 | Prefix | Service | Method and path -> RPC |
 |---|---|---|
-| `/v1/ads` | ad :9001 | `POST /v1/ads` (body = ad spec) CreateAd; `GET /v1/ads` ListMyAds; `GET /v1/ads/{ad_id}?version=` GetAd; `PUT /v1/ads/{ad_id}` (body `{expectedVersion, spec}`) EditAd; `POST /v1/ads/{ad_id}:publish` PublishAd; `POST /v1/ads/{ad_id}:hide` HideAd |
+| `/v1/ads` | ad :9001 | `POST /v1/ads` (body = ad spec) CreateAd; `GET /v1/ads?pageSize=&pageToken=` ListMyAds; `GET /v1/ads/{ad_id}?version=` GetAd; `PUT /v1/ads/{ad_id}` (body `{expectedVersion, spec}`) EditAd; `POST /v1/ads/{ad_id}:publish` PublishAd; `POST /v1/ads/{ad_id}:hide` HideAd |
 | `/v1/matching` | matching :9002 | `POST /v1/matching/search` (body `{criteria, limit}`) Search; `GET /v1/matching/ads/{ad_id}/matches?limit=` FindMatches |
-| `/v1/negotiations` | negotiation :9003 | `POST /v1/negotiations` OpenNegotiation; `GET /v1/negotiations?adId=` ListNegotiations; `GET /v1/negotiations/{negotiation_id}` GetNegotiation; `POST .../{id}:approve-ad` (`{adVersion}`); `:revise` (`{seenProposalNumber, terms}`); `:approve-proposal` and `:reject-proposal` (`{proposalNumber}`); `:close` |
-| `/v1/swaps` | swap :9004 | `GET /v1/swaps` ListMySwaps; `GET /v1/swaps/{swap_id}` GetSwap |
+| `/v1/negotiations` | negotiation :9003 | `POST /v1/negotiations` OpenNegotiation; `GET /v1/negotiations?adId=&pageSize=&pageToken=` ListNegotiations; `GET /v1/negotiations/{negotiation_id}` GetNegotiation; `POST .../{id}:approve-ad` (`{adVersion}`); `:revise` (`{seenProposalNumber, terms}`); `:approve-proposal` and `:reject-proposal` (`{proposalNumber}`); `:close` |
+| `/v1/swaps` | swap :9004 | `GET /v1/swaps?pageSize=&pageToken=` ListMySwaps; `GET /v1/swaps/{swap_id}` GetSwap |
 | `/v1/dev/swaps` | swap :9004 | `POST /v1/dev/swaps/{swap_id}/locker-fee-paid:simulate` (`{userId}`) SimulateLockerFeePaid |
 
 A path under a prefix that matches no annotation is passed to the service as a plain HTTP request and fails with 415 (it is not a JSON 404).

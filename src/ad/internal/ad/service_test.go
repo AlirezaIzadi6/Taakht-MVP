@@ -27,7 +27,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func newTestService(t *testing.T) (*Service, *pgxpool.Pool) {
@@ -167,7 +166,7 @@ func TestAdLifecycle(t *testing.T) {
 	if _, err := s.HideAd(as("user-1"), &adv1.AdIdRequest{AdId: a.Id}); err != nil {
 		t.Fatal(err)
 	}
-	list, err := s.ListMyAds(as("user-1"), &emptypb.Empty{})
+	list, err := s.ListMyAds(as("user-1"), &adv1.ListMyAdsRequest{})
 	if err != nil || len(list.Ads) != 2 {
 		t.Fatalf("list: %v %v", list, err)
 	}

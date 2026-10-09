@@ -60,6 +60,20 @@ public class SwapGrpcServiceTests(TestDatabase db) : IClassFixture<TestDatabase>
         Assert.False(paid.LegB.FeePaid);
     }
 
+    [DbFact]
+    public async Task List_my_swaps_pages_and_maps_a_bad_token_to_invalid_argument()
+    {
+        var (service, _) = await BuildAsync(false, "neg-grpc-list");
+
+        var page = await service.ListMySwaps(new SwapPb.ListMySwapsRequest { PageSize = 1 }, new FakeContext("user-1"));
+        Assert.Single(page.Swaps);
+        Assert.Equal("user-1", page.Swaps[0].LegA.OwnerUserId);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(() =>
+            service.ListMySwaps(new SwapPb.ListMySwapsRequest { PageToken = "!!!" }, new FakeContext("user-1")));
+        Assert.Equal(StatusCode.InvalidArgument, ex.StatusCode);
+    }
+
     [Theory]
     [InlineData(StatusCode.FailedPrecondition, true)]
     [InlineData(StatusCode.NotFound, true)]

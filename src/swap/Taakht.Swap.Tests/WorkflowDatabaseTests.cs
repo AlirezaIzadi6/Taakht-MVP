@@ -287,11 +287,120 @@ public class WorkflowDatabaseTests(TestDatabase db) : IClassFixture<TestDatabase
         await workflow.HandleAgreementReachedAsync(Agreement("neg-list"), CancellationToken.None);
         var swap = await SwapOfAsync(store, "neg-list");
 
-        Assert.Contains(await store.ListForUserAsync("user-1", CancellationToken.None), s => s.Id == swap.Id);
-        Assert.Contains(await store.ListForUserAsync("user-2", CancellationToken.None), s => s.Id == swap.Id);
-        Assert.DoesNotContain(await store.ListForUserAsync("user-3", CancellationToken.None), s => s.Id == swap.Id);
+        Assert.Contains((await store.ListForUserAsync("user-1", 200, null, CancellationToken.None)).Items, s => s.Id == swap.Id);
+        Assert.Contains((await store.ListForUserAsync("user-2", 200, null, CancellationToken.None)).Items, s => s.Id == swap.Id);
+        Assert.DoesNotContain((await store.ListForUserAsync("user-3", 200, null, CancellationToken.None)).Items, s => s.Id == swap.Id);
         Assert.False(swap.IsParty("user-3"));
         Assert.Equal(DomainDelivery.Locker, swap.LegA.Method);
+    }
+
+    private static AgreementReached AgreementFor(string negotiationId, string owner, string other) => new()
+    {
+        NegotiationId = negotiationId,
+        AdA = new AgreedAd { AdId = $"ad-a-{negotiationId}", OwnerId = owner, Version = 1 },
+        AdB = new AgreedAd { AdId = $"ad-b-{negotiationId}", OwnerId = other, Version = 1 },
+        Terms = new Terms { LegA = PbDelivery.Locker, LegB = PbDelivery.Locker },
+    };
+
+    private async Task<(SwapStore Store, string Owner, List<Guid> Ids)> SeedSwapsAsync(int count, bool advance)
+    {
+        var (workflow, store, clock) = Build(new FakeAdClient());
+        var owner = $"owner-{Guid.NewGuid():N}";
+        var tag = Guid.NewGuid().ToString("N");
+        var ids = new List<Guid>();
+        for (var i = 0; i < count; i++)
+        {
+            if (advance)
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+            }
+
+            // Alternate the user between the two legs: both owner columns must be paged together.
+            var msg = i % 2 == 0 ? AgreementFor($"pg-{tag}-{i}", owner, "other") : AgreementFor($"pg-{tag}-{i}", "other", owner);
+            await workflow.HandleAgreementReachedAsync(msg, CancellationToken.None);
+            ids.Add((await SwapOfAsync(store, msg.NegotiationId)).Id);
+        }
+
+        return (store, owner, ids);
+    }
+
+    private static async Task<List<Guid>> WalkAsync(SwapStore store, string owner, int size)
+    {
+        var seen = new List<Guid>();
+        var token = (string?)null;
+        var pages = 0;
+        do
+        {
+            var page = await store.ListForUserAsync(owner, size, token, CancellationToken.None);
+            seen.AddRange(page.Items.Select(s => s.Id));
+            token = page.NextPageToken;
+            Assert.True(++pages < 100);
+        }
+        while (token != string.Empty);
+        return seen;
+    }
+
+    [DbFact]
+    public async Task Listing_pages_walk_every_swap_once_even_with_tied_timestamps()
+    {
+        var (store, owner, ids) = await SeedSwapsAsync(7, advance: false); // identical created_at: the id breaks ties
+
+        var first = await store.ListForUserAsync(owner, 3, null, CancellationToken.None);
+        Assert.Equal(3, first.Items.Count);
+        Assert.NotEmpty(first.NextPageToken);
+
+        var seen = await WalkAsync(store, owner, 3);
+        Assert.Equal(ids.OrderByDescending(x => x.ToString(), StringComparer.Ordinal), seen);
+        Assert.Equal(seen, await WalkAsync(store, owner, 200));
+
+        var exact = await store.ListForUserAsync(owner, 7, null, CancellationToken.None);
+        Assert.Equal(7, exact.Items.Count);
+        Assert.Equal(string.Empty, exact.NextPageToken);
+        Assert.Empty((await store.ListForUserAsync($"nobody-{Guid.NewGuid():N}", 0, null, CancellationToken.None)).Items);
+    }
+
+    [DbFact]
+    public async Task Listing_is_newest_first_and_page_size_is_defaulted_and_clamped()
+    {
+        var (store, owner, ids) = await SeedSwapsAsync(205, advance: true);
+
+        var def = await store.ListForUserAsync(owner, 0, null, CancellationToken.None);
+        Assert.Equal(50, def.Items.Count);
+        Assert.Equal(ids[^1], def.Items[0].Id); // newest first
+        Assert.Equal(50, (await store.ListForUserAsync(owner, -1, null, CancellationToken.None)).Items.Count);
+        var big = await store.ListForUserAsync(owner, 100000, null, CancellationToken.None);
+        Assert.Equal(200, big.Items.Count);
+        var rest = await store.ListForUserAsync(owner, 100000, big.NextPageToken, CancellationToken.None);
+        Assert.Equal(5, rest.Items.Count);
+        Assert.Equal(string.Empty, rest.NextPageToken);
+    }
+
+    [DbFact]
+    public async Task Listing_rejects_a_malformed_token()
+    {
+        var (_, store, _) = Build(new FakeAdClient());
+        foreach (var token in new[] { "!!!", "abc", "bm9waXBl" })
+        {
+            await Assert.ThrowsAsync<InvalidPageTokenException>(() => store.ListForUserAsync("user-1", 10, token, CancellationToken.None));
+        }
+    }
+
+    [DbFact]
+    public async Task Listing_insert_between_pages_does_not_duplicate_or_skip_older_swaps()
+    {
+        var (store, owner, ids) = await SeedSwapsAsync(6, advance: true);
+        var p1 = await store.ListForUserAsync(owner, 3, null, CancellationToken.None);
+
+        var (workflow, _, clock) = Build(new FakeAdClient());
+        clock.Advance(TimeSpan.FromDays(1));
+        await workflow.HandleAgreementReachedAsync(AgreementFor($"pg-late-{Guid.NewGuid():N}", owner, "other"), CancellationToken.None);
+
+        var p2 = await store.ListForUserAsync(owner, 10, p1.NextPageToken, CancellationToken.None);
+        Assert.Equal(string.Empty, p2.NextPageToken);
+        var all = p1.Items.Concat(p2.Items).Select(s => s.Id).ToList();
+        Assert.Equal(6, all.Count);
+        Assert.Equal(all.Count, all.Distinct().Count());
+        Assert.Equal(Enumerable.Reverse(ids), all);
     }
 
     [DbFact]

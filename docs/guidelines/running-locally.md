@@ -68,7 +68,7 @@ grpcurl -plaintext -H 'x-user-id: user-1' \
   -d '{"spec":{"title":"Book","have_category":"books","want_categories":["tools"]}}' \
   localhost:9001 taakht.ad.v1.AdService/CreateAd
 
-grpcurl -plaintext -H 'x-user-id: user-1' localhost:9001 taakht.ad.v1.AdService/ListMyAds
+grpcurl -plaintext -H 'x-user-id: user-1' -d '{"page_size":20}' localhost:9001 taakht.ad.v1.AdService/ListMyAds
 grpcurl -plaintext -H 'x-user-id: user-1' localhost:9004 taakht.swap.v1.SwapService/ListMySwaps
 ```
 

@@ -462,16 +462,72 @@ func (x *GetAdRequest) GetVersion() int32 {
 	return 0
 }
 
+type ListMyAdsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Page size: <= 0 means 50, values above 200 are clamped to 200.
+	PageSize int32 `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// Opaque cursor from a previous response's next_page_token; empty = first page. INVALID_ARGUMENT if malformed.
+	PageToken     string `protobuf:"bytes,2,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMyAdsRequest) Reset() {
+	*x = ListMyAdsRequest{}
+	mi := &file_taakht_ad_v1_ad_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMyAdsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMyAdsRequest) ProtoMessage() {}
+
+func (x *ListMyAdsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_taakht_ad_v1_ad_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMyAdsRequest.ProtoReflect.Descriptor instead.
+func (*ListMyAdsRequest) Descriptor() ([]byte, []int) {
+	return file_taakht_ad_v1_ad_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ListMyAdsRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListMyAdsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
 type ListMyAdsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ads           []*Ad                  `protobuf:"bytes,1,rep,name=ads,proto3" json:"ads,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Ads   []*Ad                  `protobuf:"bytes,1,rep,name=ads,proto3" json:"ads,omitempty"`
+	// Empty when there is no further page.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListMyAdsResponse) Reset() {
 	*x = ListMyAdsResponse{}
-	mi := &file_taakht_ad_v1_ad_proto_msgTypes[6]
+	mi := &file_taakht_ad_v1_ad_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -483,7 +539,7 @@ func (x *ListMyAdsResponse) String() string {
 func (*ListMyAdsResponse) ProtoMessage() {}
 
 func (x *ListMyAdsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_taakht_ad_v1_ad_proto_msgTypes[6]
+	mi := &file_taakht_ad_v1_ad_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -496,7 +552,7 @@ func (x *ListMyAdsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMyAdsResponse.ProtoReflect.Descriptor instead.
 func (*ListMyAdsResponse) Descriptor() ([]byte, []int) {
-	return file_taakht_ad_v1_ad_proto_rawDescGZIP(), []int{6}
+	return file_taakht_ad_v1_ad_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListMyAdsResponse) GetAds() []*Ad {
@@ -504,6 +560,13 @@ func (x *ListMyAdsResponse) GetAds() []*Ad {
 		return x.Ads
 	}
 	return nil
+}
+
+func (x *ListMyAdsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
 }
 
 type AdRef struct {
@@ -516,7 +579,7 @@ type AdRef struct {
 
 func (x *AdRef) Reset() {
 	*x = AdRef{}
-	mi := &file_taakht_ad_v1_ad_proto_msgTypes[7]
+	mi := &file_taakht_ad_v1_ad_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -528,7 +591,7 @@ func (x *AdRef) String() string {
 func (*AdRef) ProtoMessage() {}
 
 func (x *AdRef) ProtoReflect() protoreflect.Message {
-	mi := &file_taakht_ad_v1_ad_proto_msgTypes[7]
+	mi := &file_taakht_ad_v1_ad_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -541,7 +604,7 @@ func (x *AdRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdRef.ProtoReflect.Descriptor instead.
 func (*AdRef) Descriptor() ([]byte, []int) {
-	return file_taakht_ad_v1_ad_proto_rawDescGZIP(), []int{7}
+	return file_taakht_ad_v1_ad_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *AdRef) GetAdId() string {
@@ -568,7 +631,7 @@ type LockAdsRequest struct {
 
 func (x *LockAdsRequest) Reset() {
 	*x = LockAdsRequest{}
-	mi := &file_taakht_ad_v1_ad_proto_msgTypes[8]
+	mi := &file_taakht_ad_v1_ad_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -580,7 +643,7 @@ func (x *LockAdsRequest) String() string {
 func (*LockAdsRequest) ProtoMessage() {}
 
 func (x *LockAdsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_taakht_ad_v1_ad_proto_msgTypes[8]
+	mi := &file_taakht_ad_v1_ad_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -593,7 +656,7 @@ func (x *LockAdsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LockAdsRequest.ProtoReflect.Descriptor instead.
 func (*LockAdsRequest) Descriptor() ([]byte, []int) {
-	return file_taakht_ad_v1_ad_proto_rawDescGZIP(), []int{8}
+	return file_taakht_ad_v1_ad_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *LockAdsRequest) GetSwapId() string {
@@ -642,9 +705,14 @@ const file_taakht_ad_v1_ad_proto_rawDesc = "" +
 	"\x05ad_id\x18\x01 \x01(\tR\x04adId\"=\n" +
 	"\fGetAdRequest\x12\x13\n" +
 	"\x05ad_id\x18\x01 \x01(\tR\x04adId\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\x05R\aversion\"7\n" +
+	"\aversion\x18\x02 \x01(\x05R\aversion\"N\n" +
+	"\x10ListMyAdsRequest\x12\x1b\n" +
+	"\tpage_size\x18\x01 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x02 \x01(\tR\tpageToken\"_\n" +
 	"\x11ListMyAdsResponse\x12\"\n" +
-	"\x03ads\x18\x01 \x03(\v2\x10.taakht.ad.v1.AdR\x03ads\"6\n" +
+	"\x03ads\x18\x01 \x03(\v2\x10.taakht.ad.v1.AdR\x03ads\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"6\n" +
 	"\x05AdRef\x12\x13\n" +
 	"\x05ad_id\x18\x01 \x01(\tR\x04adId\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\x05R\aversion\"P\n" +
@@ -656,14 +724,14 @@ const file_taakht_ad_v1_ad_proto_rawDesc = "" +
 	"\x13AD_STATUS_PUBLISHED\x10\x01\x12\x14\n" +
 	"\x10AD_STATUS_HIDDEN\x10\x02\x12\x14\n" +
 	"\x10AD_STATUS_LOCKED\x10\x03\x12\x14\n" +
-	"\x10AD_STATUS_CLOSED\x10\x042\xcc\x04\n" +
+	"\x10AD_STATUS_CLOSED\x10\x042\xd4\x04\n" +
 	"\tAdService\x12R\n" +
 	"\bCreateAd\x12\x1d.taakht.ad.v1.CreateAdRequest\x1a\x10.taakht.ad.v1.Ad\"\x15\x82\xd3\xe4\x93\x02\x0f:\x04spec\"\a/v1/ads\x12S\n" +
 	"\x06EditAd\x12\x1b.taakht.ad.v1.EditAdRequest\x1a\x10.taakht.ad.v1.Ad\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\x1a\x0f/v1/ads/{ad_id}\x12Y\n" +
 	"\tPublishAd\x12\x19.taakht.ad.v1.AdIdRequest\x1a\x10.taakht.ad.v1.Ad\"\x1f\x82\xd3\xe4\x93\x02\x19\"\x17/v1/ads/{ad_id}:publish\x12S\n" +
 	"\x06HideAd\x12\x19.taakht.ad.v1.AdIdRequest\x1a\x10.taakht.ad.v1.Ad\"\x1c\x82\xd3\xe4\x93\x02\x16\"\x14/v1/ads/{ad_id}:hide\x12N\n" +
-	"\x05GetAd\x12\x1a.taakht.ad.v1.GetAdRequest\x1a\x10.taakht.ad.v1.Ad\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/ads/{ad_id}\x12U\n" +
-	"\tListMyAds\x12\x16.google.protobuf.Empty\x1a\x1f.taakht.ad.v1.ListMyAdsResponse\"\x0f\x82\xd3\xe4\x93\x02\t\x12\a/v1/ads\x12?\n" +
+	"\x05GetAd\x12\x1a.taakht.ad.v1.GetAdRequest\x1a\x10.taakht.ad.v1.Ad\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/ads/{ad_id}\x12]\n" +
+	"\tListMyAds\x12\x1e.taakht.ad.v1.ListMyAdsRequest\x1a\x1f.taakht.ad.v1.ListMyAdsResponse\"\x0f\x82\xd3\xe4\x93\x02\t\x12\a/v1/ads\x12?\n" +
 	"\aLockAds\x12\x1c.taakht.ad.v1.LockAdsRequest\x1a\x16.google.protobuf.EmptyB?Z.github.com/taakht/taakht/gen/taakht/ad/v1;adv1\xaa\x02\fTaakht.Ad.V1b\x06proto3"
 
 var (
@@ -679,7 +747,7 @@ func file_taakht_ad_v1_ad_proto_rawDescGZIP() []byte {
 }
 
 var file_taakht_ad_v1_ad_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_taakht_ad_v1_ad_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_taakht_ad_v1_ad_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_taakht_ad_v1_ad_proto_goTypes = []any{
 	(AdStatus)(0),                 // 0: taakht.ad.v1.AdStatus
 	(*AdSpec)(nil),                // 1: taakht.ad.v1.AdSpec
@@ -688,35 +756,36 @@ var file_taakht_ad_v1_ad_proto_goTypes = []any{
 	(*EditAdRequest)(nil),         // 4: taakht.ad.v1.EditAdRequest
 	(*AdIdRequest)(nil),           // 5: taakht.ad.v1.AdIdRequest
 	(*GetAdRequest)(nil),          // 6: taakht.ad.v1.GetAdRequest
-	(*ListMyAdsResponse)(nil),     // 7: taakht.ad.v1.ListMyAdsResponse
-	(*AdRef)(nil),                 // 8: taakht.ad.v1.AdRef
-	(*LockAdsRequest)(nil),        // 9: taakht.ad.v1.LockAdsRequest
-	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
-	(*emptypb.Empty)(nil),         // 11: google.protobuf.Empty
+	(*ListMyAdsRequest)(nil),      // 7: taakht.ad.v1.ListMyAdsRequest
+	(*ListMyAdsResponse)(nil),     // 8: taakht.ad.v1.ListMyAdsResponse
+	(*AdRef)(nil),                 // 9: taakht.ad.v1.AdRef
+	(*LockAdsRequest)(nil),        // 10: taakht.ad.v1.LockAdsRequest
+	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
+	(*emptypb.Empty)(nil),         // 12: google.protobuf.Empty
 }
 var file_taakht_ad_v1_ad_proto_depIdxs = []int32{
 	0,  // 0: taakht.ad.v1.Ad.status:type_name -> taakht.ad.v1.AdStatus
 	1,  // 1: taakht.ad.v1.Ad.spec:type_name -> taakht.ad.v1.AdSpec
-	10, // 2: taakht.ad.v1.Ad.created_at:type_name -> google.protobuf.Timestamp
-	10, // 3: taakht.ad.v1.Ad.updated_at:type_name -> google.protobuf.Timestamp
+	11, // 2: taakht.ad.v1.Ad.created_at:type_name -> google.protobuf.Timestamp
+	11, // 3: taakht.ad.v1.Ad.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 4: taakht.ad.v1.CreateAdRequest.spec:type_name -> taakht.ad.v1.AdSpec
 	1,  // 5: taakht.ad.v1.EditAdRequest.spec:type_name -> taakht.ad.v1.AdSpec
 	2,  // 6: taakht.ad.v1.ListMyAdsResponse.ads:type_name -> taakht.ad.v1.Ad
-	8,  // 7: taakht.ad.v1.LockAdsRequest.ads:type_name -> taakht.ad.v1.AdRef
+	9,  // 7: taakht.ad.v1.LockAdsRequest.ads:type_name -> taakht.ad.v1.AdRef
 	3,  // 8: taakht.ad.v1.AdService.CreateAd:input_type -> taakht.ad.v1.CreateAdRequest
 	4,  // 9: taakht.ad.v1.AdService.EditAd:input_type -> taakht.ad.v1.EditAdRequest
 	5,  // 10: taakht.ad.v1.AdService.PublishAd:input_type -> taakht.ad.v1.AdIdRequest
 	5,  // 11: taakht.ad.v1.AdService.HideAd:input_type -> taakht.ad.v1.AdIdRequest
 	6,  // 12: taakht.ad.v1.AdService.GetAd:input_type -> taakht.ad.v1.GetAdRequest
-	11, // 13: taakht.ad.v1.AdService.ListMyAds:input_type -> google.protobuf.Empty
-	9,  // 14: taakht.ad.v1.AdService.LockAds:input_type -> taakht.ad.v1.LockAdsRequest
+	7,  // 13: taakht.ad.v1.AdService.ListMyAds:input_type -> taakht.ad.v1.ListMyAdsRequest
+	10, // 14: taakht.ad.v1.AdService.LockAds:input_type -> taakht.ad.v1.LockAdsRequest
 	2,  // 15: taakht.ad.v1.AdService.CreateAd:output_type -> taakht.ad.v1.Ad
 	2,  // 16: taakht.ad.v1.AdService.EditAd:output_type -> taakht.ad.v1.Ad
 	2,  // 17: taakht.ad.v1.AdService.PublishAd:output_type -> taakht.ad.v1.Ad
 	2,  // 18: taakht.ad.v1.AdService.HideAd:output_type -> taakht.ad.v1.Ad
 	2,  // 19: taakht.ad.v1.AdService.GetAd:output_type -> taakht.ad.v1.Ad
-	7,  // 20: taakht.ad.v1.AdService.ListMyAds:output_type -> taakht.ad.v1.ListMyAdsResponse
-	11, // 21: taakht.ad.v1.AdService.LockAds:output_type -> google.protobuf.Empty
+	8,  // 20: taakht.ad.v1.AdService.ListMyAds:output_type -> taakht.ad.v1.ListMyAdsResponse
+	12, // 21: taakht.ad.v1.AdService.LockAds:output_type -> google.protobuf.Empty
 	15, // [15:22] is the sub-list for method output_type
 	8,  // [8:15] is the sub-list for method input_type
 	8,  // [8:8] is the sub-list for extension type_name
@@ -735,7 +804,7 @@ func file_taakht_ad_v1_ad_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_taakht_ad_v1_ad_proto_rawDesc), len(file_taakht_ad_v1_ad_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -50,3 +50,6 @@ public sealed record NegotiationView(
     AdVersions Versions,
     Taakht.Ad.V1.Ad? RequesterAd = null,
     Taakht.Ad.V1.Ad? TargetAd = null);
+
+/// <summary>One page of <see cref="NegotiationView"/>s, newest first; <see cref="NextPageToken"/> is empty on the last page.</summary>
+public sealed record NegotiationPage(IReadOnlyList<NegotiationView> Items, string NextPageToken);

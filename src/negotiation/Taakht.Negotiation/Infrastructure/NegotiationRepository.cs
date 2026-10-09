@@ -79,7 +79,7 @@ public static class NegotiationRepository
         }
 
         var rows = (await conn.QueryAsync<NegotiationRow>(new CommandDefinition(
-            $"SELECT {_negotiationColumns} FROM negotiation WHERE id = ANY(@ids) ORDER BY {(forUpdate ? "id" : "created_at DESC, id")}"
+            $"SELECT {_negotiationColumns} FROM negotiation WHERE id = ANY(@ids) ORDER BY {(forUpdate ? "id" : "created_at DESC, id DESC")}"
             + (forUpdate ? " FOR UPDATE" : string.Empty),
             new { ids = ids.ToArray() }, tx, cancellationToken: ct))).ToList();
 
@@ -112,13 +112,22 @@ public static class NegotiationRepository
         return result;
     }
 
-    /// <summary>Newest first; only negotiations where the user is a party, optionally on one ad.</summary>
-    public static async Task<List<Guid>> ListIdsAsync(NpgsqlConnection conn, string userId, string? adId, CancellationToken ct)
+    /// <summary>
+    /// Keyset page, newest first (created_at DESC, id DESC); only negotiations where the user is a party, optionally on
+    /// one ad. <paramref name="after"/> is the (created_at, id) of the last item of the previous page. Returns up to
+    /// <paramref name="limit"/> ids; callers ask for one more than the page size to learn whether a next page exists.
+    /// </summary>
+    public static async Task<List<Guid>> ListIdsAsync(
+        NpgsqlConnection conn, string userId, string? adId, (DateTime CreatedAt, Guid Id)? after, int limit, CancellationToken ct)
     {
         var sql = "SELECT id FROM negotiation WHERE (requester_user_id = @userId OR target_user_id = @userId)"
             + (string.IsNullOrEmpty(adId) ? string.Empty : " AND (requester_ad_id = @adId OR target_ad_id = @adId)")
-            + " ORDER BY created_at DESC, id";
-        return (await conn.QueryAsync<Guid>(new CommandDefinition(sql, new { userId, adId }, cancellationToken: ct))).ToList();
+            + (after is null ? string.Empty : " AND (created_at, id) < (@afterCreatedAt, @afterId)")
+            + " ORDER BY created_at DESC, id DESC LIMIT @limit";
+        return (await conn.QueryAsync<Guid>(new CommandDefinition(
+            sql,
+            new { userId, adId, afterCreatedAt = after?.CreatedAt, afterId = after?.Id, limit },
+            cancellationToken: ct))).ToList();
     }
 
     public static async Task UpsertAdRefAsync(NpgsqlConnection conn, NpgsqlTransaction tx, AdSnapshot ad, CancellationToken ct)

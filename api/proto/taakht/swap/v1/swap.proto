@@ -3,7 +3,6 @@ syntax = "proto3";
 package taakht.swap.v1;
 
 import "google/api/annotations.proto";
-import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "taakht/negotiation/v1/negotiation.proto";
 
@@ -48,7 +47,8 @@ service SwapService {
       get: "/v1/swaps/{swap_id}"
     };
   }
-  rpc ListMySwaps(google.protobuf.Empty) returns (ListMySwapsResponse) {
+  // The caller's swaps, newest first, one page at a time.
+  rpc ListMySwaps(ListMySwapsRequest) returns (ListMySwapsResponse) {
     option (google.api.http) = {
       get: "/v1/swaps"
     };
@@ -65,8 +65,16 @@ service SwapService {
 message SwapIdRequest {
   string swap_id = 1;
 }
+message ListMySwapsRequest {
+  // Page size: <= 0 means 50, values above 200 are clamped to 200.
+  int32 page_size = 1;
+  // Opaque cursor from a previous response's next_page_token; empty = first page. INVALID_ARGUMENT if malformed.
+  string page_token = 2;
+}
 message ListMySwapsResponse {
   repeated Swap swaps = 1;
+  // Empty when there is no further page.
+  string next_page_token = 2;
 }
 message SimulateLockerFeePaidRequest {
   string swap_id = 1;

@@ -282,7 +282,7 @@ open_agree_and_lock() {
   kv "negotiation $N2 -> $(j .status)"
 
   step "Swap service takes the atomic lock on both ads (saga: ad.LockAds in ONE DB transaction)"
-  poll "swap for the negotiation is AWAITING_PAYMENT" user-1 "/v1/swaps" \
+  poll "swap for the negotiation is AWAITING_PAYMENT" user-1 "/v1/swaps?pageSize=200" \
     "any(.swaps[]?; .negotiationId == \"$N2\" and .status == \"SWAP_STATUS_AWAITING_PAYMENT\")" 40
   SWAP="$(j ".swaps[] | select(.negotiationId == \"$N2\") | .id")"
   SWAP_JSON="$(j ".swaps[] | select(.negotiationId == \"$N2\")")"

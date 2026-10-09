@@ -489,10 +489,11 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
 
         var ex = await Assert.ThrowsAsync<DomainException>(() => h.Service.GetAsync(u3, first, default));
         Assert.Equal(DomainError.PermissionDenied, ex.Error);
-        var list = await h.Service.ListAsync(u1, mine.AdId, default);
-        Assert.Equal([second, first], list.Select(v => v.Negotiation.Id));
-        Assert.Single(await h.Service.ListAsync(u2, null, default));
-        Assert.Empty(await h.Service.ListAsync(u2, t2.AdId, default));
+        var list = await h.Service.ListAsync(u1, mine.AdId, 0, null, default);
+        Assert.Equal([second, first], list.Items.Select(v => v.Negotiation.Id));
+        Assert.Equal(string.Empty, list.NextPageToken);
+        Assert.Single((await h.Service.ListAsync(u2, null, 0, null, default)).Items);
+        Assert.Empty((await h.Service.ListAsync(u2, t2.AdId, 0, null, default)).Items);
     }
 
     [Fact]
@@ -784,7 +785,7 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
         h.SetAll(d);
         await h.Service.OpenAsync(u1, a.AdId, d.AdId, default);
         h.Ads.DetailCalls.Clear();
-        var list = await h.Service.ListAsync(u1, null, default);
+        var list = (await h.Service.ListAsync(u1, null, 0, null, default)).Items;
         Assert.Equal(2, list.Count);
         Assert.All(list, v => Assert.NotNull(v.RequesterAd));
         Assert.Equal(3, h.Ads.DetailCalls.Count); // a, b, d: ad a appears in both negotiations but is fetched once
@@ -796,9 +797,189 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
         Assert.NotNull(degraded.RequesterAd);
         Assert.Null(degraded.TargetAd);
         Assert.Equal(NegotiationStatus.Withdrawn, degraded.Negotiation.Status);
-        var degradedList = await h.Service.ListAsync(u1, null, default);
+        var degradedList = (await h.Service.ListAsync(u1, null, 0, null, default)).Items;
         Assert.Equal(2, degradedList.Count);
         var wireDegraded = Api.Mapper.ToProto(degraded);
         Assert.Null(wireDegraded.TargetAd);
+    }
+
+    // Opens n negotiations for one user (all at the same fake-clock instant unless advance is set), newest last.
+    private static async Task<List<Guid>> OpenManyAsync(Harness h, string requester, int n, bool advance)
+    {
+        var mine = NewAd(requester);
+        h.SetAll(mine);
+        var ids = new List<Guid>();
+        for (var i = 0; i < n; i++)
+        {
+            var target = NewAd(Guid.NewGuid().ToString());
+            h.Ads.Set(target);
+            if (advance)
+            {
+                h.Clock.Advance(TimeSpan.FromSeconds(1));
+            }
+
+            ids.Add((await h.Service.OpenAsync(requester, mine.AdId, target.AdId, default)).Negotiation.Id);
+        }
+
+        return ids;
+    }
+
+    private static async Task<List<Guid>> WalkAsync(Harness h, string user, string? adId, int size)
+    {
+        var seen = new List<Guid>();
+        string? token = null;
+        var pages = 0;
+        do
+        {
+            var page = await h.Service.ListAsync(user, adId, size, token, default);
+            seen.AddRange(page.Items.Select(v => v.Negotiation.Id));
+            token = page.NextPageToken;
+            Assert.True(++pages < 100);
+        }
+        while (token != string.Empty);
+        return seen;
+    }
+
+    [Fact]
+    public async Task ListPagesWalkEverythingOnceWithTiedTimestamps()
+    {
+        var h = Create(cap: 1000);
+        if (h is null)
+        {
+            return;
+        }
+
+        var u1 = Guid.NewGuid().ToString();
+        var ids = await OpenManyAsync(h, u1, 7, advance: false); // identical created_at: only the id breaks ties
+
+        var first = await h.Service.ListAsync(u1, null, 3, null, default);
+        Assert.Equal(3, first.Items.Count);
+        Assert.NotEmpty(first.NextPageToken);
+
+        var seen = await WalkAsync(h, u1, null, 3);
+        Assert.Equal(7, seen.Count);
+        Assert.Equal(ids.OrderByDescending(x => x.ToString(), StringComparer.Ordinal), seen.AsEnumerable()); // created_at DESC, id DESC
+        Assert.Equal(seen, await WalkAsync(h, u1, null, 200));
+
+        var exact = await h.Service.ListAsync(u1, null, 7, null, default);
+        Assert.Equal(7, exact.Items.Count);
+        Assert.Equal(string.Empty, exact.NextPageToken);
+
+        Assert.Empty((await h.Service.ListAsync(Guid.NewGuid().ToString(), null, 0, null, default)).Items);
+    }
+
+    [Fact]
+    public async Task ListPageSizeDefaultsAndIsClamped()
+    {
+        var h = Create(cap: 1000);
+        if (h is null)
+        {
+            return;
+        }
+
+        var u1 = Guid.NewGuid().ToString();
+        await OpenManyAsync(h, u1, 205, advance: true);
+
+        Assert.Equal(50, (await h.Service.ListAsync(u1, null, 0, null, default)).Items.Count);
+        Assert.Equal(50, (await h.Service.ListAsync(u1, null, -3, null, default)).Items.Count);
+        var big = await h.Service.ListAsync(u1, null, 100000, null, default);
+        Assert.Equal(200, big.Items.Count);
+        Assert.NotEmpty(big.NextPageToken);
+        var rest = await h.Service.ListAsync(u1, null, 100000, big.NextPageToken, default);
+        Assert.Equal(5, rest.Items.Count);
+        Assert.Equal(string.Empty, rest.NextPageToken);
+    }
+
+    [Fact]
+    public async Task ListPageEnrichesOnlyTheReturnedPage()
+    {
+        var h = Create(cap: 1000);
+        if (h is null)
+        {
+            return;
+        }
+
+        var u1 = Guid.NewGuid().ToString();
+        await OpenManyAsync(h, u1, 6, advance: true);
+        h.Ads.DetailCalls.Clear();
+
+        var page = await h.Service.ListAsync(u1, null, 2, null, default);
+
+        Assert.Equal(2, page.Items.Count);
+        Assert.Equal(3, h.Ads.DetailCalls.Distinct().Count()); // own ad once + two counterpart ads
+        Assert.Equal(3, h.Ads.DetailCalls.Count);
+    }
+
+    [Fact]
+    public async Task ListInvalidTokenIsInvalidArgument()
+    {
+        var h = Create();
+        if (h is null)
+        {
+            return;
+        }
+
+        foreach (var token in new[] { "!!!", "abc", "bm9waXBl" })
+        {
+            var ex = await Assert.ThrowsAsync<DomainException>(() => h.Service.ListAsync("user-1", null, 10, token, default));
+            Assert.Equal(DomainError.InvalidArgument, ex.Error);
+        }
+    }
+
+    [Fact]
+    public async Task ListInsertBetweenPagesDoesNotDuplicateOrSkipOlderItems()
+    {
+        var h = Create(cap: 1000);
+        if (h is null)
+        {
+            return;
+        }
+
+        var u1 = Guid.NewGuid().ToString();
+        var ids = await OpenManyAsync(h, u1, 6, advance: true);
+        var p1 = await h.Service.ListAsync(u1, null, 3, null, default);
+
+        var late = NewAd(Guid.NewGuid().ToString());
+        h.Ads.Set(late);
+        h.Clock.Advance(TimeSpan.FromSeconds(1));
+        var mine = p1.Items[0].Negotiation.RequesterAdId;
+        await h.Service.OpenAsync(u1, mine, late.AdId, default);
+
+        var p2 = await h.Service.ListAsync(u1, null, 10, p1.NextPageToken, default);
+
+        Assert.Equal(string.Empty, p2.NextPageToken);
+        var all = p1.Items.Concat(p2.Items).Select(v => v.Negotiation.Id).ToList();
+        Assert.Equal(6, all.Count);
+        Assert.Equal(all.Count, all.Distinct().Count());
+        Assert.Equal(ids.OrderByDescending(x => ids.IndexOf(x)), all);
+    }
+
+    [Fact]
+    public async Task ListAdFilterIsKeptWhilePaging()
+    {
+        var h = Create(cap: 1000);
+        if (h is null)
+        {
+            return;
+        }
+
+        var u1 = Guid.NewGuid().ToString();
+        var a = NewAd(u1);
+        var b = NewAd(u1);
+        h.SetAll(a, b);
+        for (var i = 0; i < 3; i++)
+        {
+            var t = NewAd(Guid.NewGuid().ToString());
+            h.Ads.Set(t);
+            h.Clock.Advance(TimeSpan.FromSeconds(1));
+            await h.Service.OpenAsync(u1, a.AdId, t.AdId, default);
+        }
+
+        var tb = NewAd(Guid.NewGuid().ToString());
+        h.Ads.Set(tb);
+        await h.Service.OpenAsync(u1, b.AdId, tb.AdId, default);
+
+        Assert.Equal(3, (await WalkAsync(h, u1, a.AdId, 2)).Count);
+        Assert.Equal(4, (await WalkAsync(h, u1, null, 2)).Count);
     }
 }

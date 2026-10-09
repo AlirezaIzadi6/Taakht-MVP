@@ -25,11 +25,20 @@ public sealed class SwapGrpcService(SwapStore store, SwapWorkflow workflow, Swap
         return ToProto(swap);
     }
 
-    public override async Task<SwapPb.ListMySwapsResponse> ListMySwaps(Empty request, ServerCallContext context)
+    public override async Task<SwapPb.ListMySwapsResponse> ListMySwaps(SwapPb.ListMySwapsRequest request, ServerCallContext context)
     {
-        var swaps = await store.ListForUserAsync(CurrentUser.Id(context), context.CancellationToken);
-        var response = new SwapPb.ListMySwapsResponse();
-        response.Swaps.AddRange(swaps.Select(ToProto));
+        SwapPage page;
+        try
+        {
+            page = await store.ListForUserAsync(CurrentUser.Id(context), request.PageSize, request.PageToken, context.CancellationToken);
+        }
+        catch (InvalidPageTokenException ex)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
+
+        var response = new SwapPb.ListMySwapsResponse { NextPageToken = page.NextPageToken };
+        response.Swaps.AddRange(page.Items.Select(ToProto));
         return response;
     }
 

@@ -46,14 +46,31 @@ public sealed class SwapStore(NpgsqlDataSource dataSource)
         return row?.ToModel();
     }
 
-    public async Task<IReadOnlyList<SwapModel>> ListForUserAsync(string userId, CancellationToken ct)
+    /// <summary>
+    /// One keyset page of the user's swaps, newest first (created_at DESC, id DESC). <paramref name="pageSize"/> follows
+    /// <see cref="Pagination.PageSize"/>; a malformed <paramref name="pageToken"/> throws <see cref="InvalidPageTokenException"/>.
+    /// </summary>
+    public async Task<SwapPage> ListForUserAsync(string userId, int pageSize, string? pageToken, CancellationToken ct)
     {
+        (DateTime CreatedAt, Guid Id)? after = null;
+        if (!string.IsNullOrEmpty(pageToken))
+        {
+            after = Pagination.TryDecode(pageToken, out var createdAt, out var cursorId)
+                ? (createdAt, cursorId)
+                : throw new InvalidPageTokenException();
+        }
+
+        var size = Pagination.PageSize(pageSize);
         await using var conn = await dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<SwapRow>(new CommandDefinition(
-            $"SELECT {_columns} FROM swap WHERE leg_a_owner = @userId OR leg_b_owner = @userId ORDER BY created_at DESC",
-            new { userId },
-            cancellationToken: ct));
-        return [.. rows.Select(r => r.ToModel())];
+        var rows = (await conn.QueryAsync<SwapRow>(new CommandDefinition(
+            $"SELECT {_columns} FROM swap WHERE (leg_a_owner = @userId OR leg_b_owner = @userId)"
+            + (after is null ? string.Empty : " AND (created_at, id) < (@afterCreatedAt, @afterId)")
+            + " ORDER BY created_at DESC, id DESC LIMIT @limit",
+            new { userId, afterCreatedAt = after?.CreatedAt, afterId = after?.Id, limit = size + 1 },
+            cancellationToken: ct))).ToList();
+        var swaps = rows.Take(size).Select(r => r.ToModel()).ToList();
+        var next = rows.Count > size ? Pagination.Encode(swaps[^1].CreatedAt, swaps[^1].Id) : string.Empty;
+        return new SwapPage(swaps, next);
     }
 
     public async Task<IReadOnlyList<Guid>> ListOverdueAsync(DateTimeOffset now, CancellationToken ct)
@@ -218,3 +235,9 @@ public sealed class SwapStore(NpgsqlDataSource dataSource)
             new DateTimeOffset(DateTime.SpecifyKind(CreatedAt, DateTimeKind.Utc)));
     }
 }
+
+/// <summary>One page of swaps, newest first; <see cref="NextPageToken"/> is empty on the last page.</summary>
+public sealed record SwapPage(IReadOnlyList<SwapModel> Items, string NextPageToken);
+
+/// <summary>The caller sent a page token that is not one of ours.</summary>
+public sealed class InvalidPageTokenException() : Exception("invalid page_token");

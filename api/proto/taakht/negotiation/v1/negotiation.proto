@@ -159,7 +159,13 @@ message NegotiationIdRequest {
 }
 message ListNegotiationsRequest {
   string ad_id = 1;
+  // Page size: <= 0 means 50, values above 200 are clamped to 200.
+  int32 page_size = 2;
+  // Opaque cursor from a previous response's next_page_token; empty = first page. INVALID_ARGUMENT if malformed.
+  string page_token = 3;
 }
 message ListNegotiationsResponse {
   repeated Negotiation negotiations = 1;
+  // Empty when there is no further page.
+  string next_page_token = 2;
 }

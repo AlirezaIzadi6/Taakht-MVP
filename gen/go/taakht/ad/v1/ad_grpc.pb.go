@@ -41,7 +41,8 @@ type AdServiceClient interface {
 	PublishAd(ctx context.Context, in *AdIdRequest, opts ...grpc.CallOption) (*Ad, error)
 	HideAd(ctx context.Context, in *AdIdRequest, opts ...grpc.CallOption) (*Ad, error)
 	GetAd(ctx context.Context, in *GetAdRequest, opts ...grpc.CallOption) (*Ad, error)
-	ListMyAds(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListMyAdsResponse, error)
+	// The caller's own ads, newest first, one page at a time.
+	ListMyAds(ctx context.Context, in *ListMyAdsRequest, opts ...grpc.CallOption) (*ListMyAdsResponse, error)
 	// Atomically claims both ads for a swap. Idempotent by swap_id.
 	// FAILED_PRECONDITION if an ad is not lockable or its version differs from the agreed one.
 	LockAds(ctx context.Context, in *LockAdsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
@@ -105,7 +106,7 @@ func (c *adServiceClient) GetAd(ctx context.Context, in *GetAdRequest, opts ...g
 	return out, nil
 }
 
-func (c *adServiceClient) ListMyAds(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListMyAdsResponse, error) {
+func (c *adServiceClient) ListMyAds(ctx context.Context, in *ListMyAdsRequest, opts ...grpc.CallOption) (*ListMyAdsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListMyAdsResponse)
 	err := c.cc.Invoke(ctx, AdService_ListMyAds_FullMethodName, in, out, cOpts...)
@@ -137,7 +138,8 @@ type AdServiceServer interface {
 	PublishAd(context.Context, *AdIdRequest) (*Ad, error)
 	HideAd(context.Context, *AdIdRequest) (*Ad, error)
 	GetAd(context.Context, *GetAdRequest) (*Ad, error)
-	ListMyAds(context.Context, *emptypb.Empty) (*ListMyAdsResponse, error)
+	// The caller's own ads, newest first, one page at a time.
+	ListMyAds(context.Context, *ListMyAdsRequest) (*ListMyAdsResponse, error)
 	// Atomically claims both ads for a swap. Idempotent by swap_id.
 	// FAILED_PRECONDITION if an ad is not lockable or its version differs from the agreed one.
 	LockAds(context.Context, *LockAdsRequest) (*emptypb.Empty, error)
@@ -166,7 +168,7 @@ func (UnimplementedAdServiceServer) HideAd(context.Context, *AdIdRequest) (*Ad, 
 func (UnimplementedAdServiceServer) GetAd(context.Context, *GetAdRequest) (*Ad, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAd not implemented")
 }
-func (UnimplementedAdServiceServer) ListMyAds(context.Context, *emptypb.Empty) (*ListMyAdsResponse, error) {
+func (UnimplementedAdServiceServer) ListMyAds(context.Context, *ListMyAdsRequest) (*ListMyAdsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListMyAds not implemented")
 }
 func (UnimplementedAdServiceServer) LockAds(context.Context, *LockAdsRequest) (*emptypb.Empty, error) {
@@ -284,7 +286,7 @@ func _AdService_GetAd_Handler(srv interface{}, ctx context.Context, dec func(int
 }
 
 func _AdService_ListMyAds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
+	in := new(ListMyAdsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -296,7 +298,7 @@ func _AdService_ListMyAds_Handler(srv interface{}, ctx context.Context, dec func
 		FullMethod: AdService_ListMyAds_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AdServiceServer).ListMyAds(ctx, req.(*emptypb.Empty))
+		return srv.(AdServiceServer).ListMyAds(ctx, req.(*ListMyAdsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

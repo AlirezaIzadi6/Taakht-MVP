@@ -845,8 +845,12 @@ func (x *NegotiationIdRequest) GetNegotiationId() string {
 }
 
 type ListNegotiationsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AdId          string                 `protobuf:"bytes,1,opt,name=ad_id,json=adId,proto3" json:"ad_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	AdId  string                 `protobuf:"bytes,1,opt,name=ad_id,json=adId,proto3" json:"ad_id,omitempty"`
+	// Page size: <= 0 means 50, values above 200 are clamped to 200.
+	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// Opaque cursor from a previous response's next_page_token; empty = first page. INVALID_ARGUMENT if malformed.
+	PageToken     string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -888,9 +892,25 @@ func (x *ListNegotiationsRequest) GetAdId() string {
 	return ""
 }
 
+func (x *ListNegotiationsRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListNegotiationsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
 type ListNegotiationsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Negotiations  []*Negotiation         `protobuf:"bytes,1,rep,name=negotiations,proto3" json:"negotiations,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Negotiations []*Negotiation         `protobuf:"bytes,1,rep,name=negotiations,proto3" json:"negotiations,omitempty"`
+	// Empty when there is no further page.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -930,6 +950,13 @@ func (x *ListNegotiationsResponse) GetNegotiations() []*Negotiation {
 		return x.Negotiations
 	}
 	return nil
+}
+
+func (x *ListNegotiationsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
 }
 
 var File_taakht_negotiation_v1_negotiation_proto protoreflect.FileDescriptor
@@ -988,11 +1015,15 @@ const file_taakht_negotiation_v1_negotiation_proto_rawDesc = "" +
 	"\x17CloseNegotiationRequest\x12%\n" +
 	"\x0enegotiation_id\x18\x01 \x01(\tR\rnegotiationId\"=\n" +
 	"\x14NegotiationIdRequest\x12%\n" +
-	"\x0enegotiation_id\x18\x01 \x01(\tR\rnegotiationId\".\n" +
+	"\x0enegotiation_id\x18\x01 \x01(\tR\rnegotiationId\"j\n" +
 	"\x17ListNegotiationsRequest\x12\x13\n" +
-	"\x05ad_id\x18\x01 \x01(\tR\x04adId\"b\n" +
+	"\x05ad_id\x18\x01 \x01(\tR\x04adId\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"\x8a\x01\n" +
 	"\x18ListNegotiationsResponse\x12F\n" +
-	"\fnegotiations\x18\x01 \x03(\v2\".taakht.negotiation.v1.NegotiationR\fnegotiations*l\n" +
+	"\fnegotiations\x18\x01 \x03(\v2\".taakht.negotiation.v1.NegotiationR\fnegotiations\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken*l\n" +
 	"\x0eDeliveryMethod\x12\x1f\n" +
 	"\x1bDELIVERY_METHOD_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19DELIVERY_METHOD_IN_PERSON\x10\x01\x12\x1a\n" +

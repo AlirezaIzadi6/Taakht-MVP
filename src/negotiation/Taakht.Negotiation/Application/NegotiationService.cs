@@ -171,14 +171,31 @@ public sealed class NegotiationService(
         return new NegotiationView(n, await VersionsAsync(conn, null, n, ct));
     }
 
-    public async Task<IReadOnlyList<NegotiationView>> ListAsync(string userId, string? adId, CancellationToken ct)
+    /// <summary>
+    /// One keyset page of the caller's negotiations, newest first. <paramref name="pageSize"/> follows
+    /// <see cref="Pagination.PageSize"/>; a malformed <paramref name="pageToken"/> is INVALID_ARGUMENT. The counterpart ads
+    /// are fetched for the returned page only.
+    /// </summary>
+    public async Task<NegotiationPage> ListAsync(string userId, string? adId, int pageSize, string? pageToken, CancellationToken ct)
     {
+        (DateTime, Guid)? after = null;
+        if (!string.IsNullOrEmpty(pageToken))
+        {
+            after = Pagination.TryDecode(pageToken, out var createdAt, out var cursorId)
+                ? (createdAt, cursorId)
+                : throw new DomainException(DomainError.InvalidArgument, "invalid page_token");
+        }
+
+        var size = Pagination.PageSize(pageSize);
         await using var conn = await dataSource.OpenConnectionAsync(ct);
-        var ids = await NegotiationRepository.ListIdsAsync(conn, userId, adId, ct);
-        var negotiations = await NegotiationRepository.LoadManyAsync(conn, null, ids, false, ct);
+        var ids = await NegotiationRepository.ListIdsAsync(conn, userId, adId, after, size + 1, ct);
+        var hasMore = ids.Count > size;
+        var negotiations = await NegotiationRepository.LoadManyAsync(conn, null, hasMore ? ids.Take(size).ToList() : ids, false, ct);
         var versions = await NegotiationRepository.AdVersionsAsync(
             conn, null, [.. negotiations.SelectMany(n => new[] { n.RequesterAdId, n.TargetAdId }).Distinct()], ct);
-        return await WithAdsAsync([.. negotiations.Select(n => new NegotiationView(n, ToVersions(n, versions)))], ct);
+        var items = await WithAdsAsync([.. negotiations.Select(n => new NegotiationView(n, ToVersions(n, versions)))], ct);
+        var next = hasMore && negotiations.Count > 0 ? Pagination.Encode(negotiations[^1].CreatedAt, negotiations[^1].Id) : string.Empty;
+        return new NegotiationPage(items, next);
     }
 
     /// <summary>

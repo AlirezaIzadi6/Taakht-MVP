@@ -8,6 +8,7 @@ import (
 	adv1 "github.com/taakht/taakht/gen/taakht/ad/v1"
 	"github.com/taakht/taakht/libs/goplatform/identity"
 	"github.com/taakht/taakht/libs/goplatform/outbox"
+	"github.com/taakht/taakht/libs/goplatform/pagination"
 	"github.com/taakht/taakht/src/ad/internal/eligibility"
 
 	"github.com/google/uuid"
@@ -202,27 +203,48 @@ func (s *Service) GetAd(ctx context.Context, req *adv1.GetAdRequest) (*adv1.Ad, 
 	return ad, nil
 }
 
-func (s *Service) ListMyAds(ctx context.Context, _ *emptypb.Empty) (*adv1.ListMyAdsResponse, error) {
-	rows, err := s.pool.Query(ctx, `SELECT ad.id::text, ad.owner_id, ad.status, ad.current_version,
+// ListMyAds returns the caller's ads, newest first, one keyset page at a time (created_at DESC, id DESC).
+func (s *Service) ListMyAds(ctx context.Context, req *adv1.ListMyAdsRequest) (*adv1.ListMyAdsResponse, error) {
+	cur, hasCur, err := pagination.Decode(req.GetPageToken())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	size := pagination.PageSize(req.GetPageSize())
+	const base = `SELECT ad.id::text, ad.owner_id, ad.status, ad.current_version,
 		coalesce(ad.status_before_lock, ''), ad.created_at, ad.updated_at, v.spec FROM ad
 		JOIN ad_version v ON v.ad_id = ad.id AND v.version = ad.current_version
-		WHERE ad.owner_id = $1 ORDER BY ad.created_at, ad.id`, identity.UserID(ctx))
+		WHERE ad.owner_id = $1`
+	const order = ` ORDER BY ad.created_at DESC, ad.id DESC LIMIT `
+	var rows pgx.Rows
+	if hasCur {
+		rows, err = s.pool.Query(ctx, base+` AND (ad.created_at, ad.id) < ($2, $3::uuid)`+order+`$4`,
+			identity.UserID(ctx), cur.CreatedAt, cur.ID, size+1)
+	} else {
+		rows, err = s.pool.Query(ctx, base+order+`$2`, identity.UserID(ctx), size+1)
+	}
 	if err != nil {
 		return nil, internal("list ads", err)
 	}
 	defer rows.Close()
 	resp := &adv1.ListMyAdsResponse{}
+	var last *adRow
 	for rows.Next() {
 		r := &adRow{}
 		var raw []byte
 		if err := rows.Scan(&r.ID, &r.OwnerID, &r.Status, &r.Version, &r.StatusBeforeLock, &r.CreatedAt, &r.UpdatedAt, &raw); err != nil {
 			return nil, internal("scan ad", err)
 		}
+		if len(resp.Ads) == size {
+			// The extra row only proves there is a next page; the token points at the last returned item.
+			resp.NextPageToken = pagination.Encode(last.CreatedAt, last.ID)
+			break
+		}
 		spec, err := decodeSpec(raw)
 		if err != nil {
 			return nil, err
 		}
 		resp.Ads = append(resp.Ads, r.snapshot(spec))
+		last = r
 	}
 	if err := rows.Err(); err != nil {
 		return nil, internal("list ads", err)
