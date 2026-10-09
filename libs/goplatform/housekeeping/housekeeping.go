@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/taakht/taakht/libs/goplatform/observe"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -44,10 +46,37 @@ type Options struct {
 	OutboxRetention     time.Duration // published outbox rows older than this are deleted
 	ProcessedRetention  time.Duration // processed_events rows older than this are deleted
 	DeadLetterRetention time.Duration // dead_letter rows older than this are deleted
+	Extra               []Prune       // service-specific prunes run after the built-in ones
 	Interval            time.Duration // time between sweeps
 	InitialDelay        time.Duration // delay before the first sweep; 0 selects the default
 	BatchSize           int           // rows per DELETE statement
 	Logger              *slog.Logger
+}
+
+// Prune is a service-specific retention rule. SQL is a batched DELETE that takes the retention in
+// seconds as $1 and the batch size as $2 and must delete at most $2 rows (use a LIMIT subquery).
+type Prune struct {
+	Name      string        // used in logs and validation messages, e.g. the env variable name
+	Retention time.Duration // at least MinDuration
+	SQL       string
+}
+
+// EnvDuration reads a retention-style duration from the environment (same syntax as the other
+// housekeeping variables, "d" suffix included). An unset variable yields def; a value below
+// MinDuration or unparseable is an error.
+func EnvDuration(name string, def time.Duration) (time.Duration, error) {
+	v := os.Getenv(name)
+	if v == "" {
+		return def, nil
+	}
+	d, err := ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("housekeeping: %s: %w", name, err)
+	}
+	if d < MinDuration {
+		return 0, fmt.Errorf("housekeeping: %s=%s is below the minimum of %s", name, d, MinDuration)
+	}
+	return d, nil
 }
 
 func (o Options) withDefaults() Options {
@@ -86,6 +115,11 @@ func (o Options) Validate() error {
 	} {
 		if d < MinDuration {
 			return fmt.Errorf("housekeeping: %s=%s is below the minimum of %s", name, d, MinDuration)
+		}
+	}
+	for _, p := range o.Extra {
+		if p.Retention < MinDuration {
+			return fmt.Errorf("housekeeping: %s=%s is below the minimum of %s", p.Name, p.Retention, MinDuration)
 		}
 	}
 	return nil
@@ -180,6 +214,11 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 // It logs at info only when something was deleted.
 func PruneOnce(ctx context.Context, pool *pgxpool.Pool, opts Options) (outboxDeleted, processedDeleted, deadLetterDeleted int64, err error) {
 	opts = opts.withDefaults()
+	defer func() { // taakht_housekeeping_deleted_total, also for a sweep that stopped on an error
+		observe.HousekeepingDeleted.WithLabelValues("outbox").Add(float64(outboxDeleted))
+		observe.HousekeepingDeleted.WithLabelValues("processed_events").Add(float64(processedDeleted))
+		observe.HousekeepingDeleted.WithLabelValues("dead_letter").Add(float64(deadLetterDeleted))
+	}()
 	outboxDeleted, err = deleteBatches(ctx, pool, opts.BatchSize, opts.OutboxRetention,
 		`DELETE FROM outbox WHERE id IN (
 			SELECT id FROM outbox
@@ -203,6 +242,16 @@ func PruneOnce(ctx context.Context, pool *pgxpool.Pool, opts Options) (outboxDel
 			LIMIT $2 FOR UPDATE SKIP LOCKED)`)
 	if err != nil {
 		return outboxDeleted, processedDeleted, deadLetterDeleted, fmt.Errorf("prune dead_letter: %w", err)
+	}
+	for _, p := range opts.Extra {
+		n, err := deleteBatches(ctx, pool, opts.BatchSize, p.Retention, p.SQL)
+		observe.HousekeepingDeleted.WithLabelValues(p.Name).Add(float64(n))
+		if n > 0 {
+			opts.Logger.Info("housekeeping: pruned", "prune", p.Name, "deleted", n)
+		}
+		if err != nil {
+			return outboxDeleted, processedDeleted, deadLetterDeleted, fmt.Errorf("prune %s: %w", p.Name, err)
+		}
 	}
 	if outboxDeleted > 0 || processedDeleted > 0 || deadLetterDeleted > 0 {
 		opts.Logger.Info("housekeeping: pruned",

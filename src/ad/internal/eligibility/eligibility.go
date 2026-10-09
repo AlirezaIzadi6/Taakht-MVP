@@ -3,8 +3,12 @@ package eligibility
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+
+	"github.com/taakht/taakht/libs/goplatform/reload"
 )
 
 // Config is the subset of config/eligibility.json the ad service validates against.
@@ -41,8 +45,38 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(raw, c); err != nil {
 		return nil, fmt.Errorf("eligibility: parse %s: %w", path, err)
 	}
+	if err := c.validate(); err != nil {
+		return nil, fmt.Errorf("eligibility: %s: %w", path, err)
+	}
 	c.index()
 	return c, nil
+}
+
+// LoadReloadable loads the file and returns a holder main refreshes when the file changes; a changed file
+// that fails Load's parsing or validation is rejected and the previous config stays in force.
+func LoadReloadable(path string, log *slog.Logger) (*reload.Reloadable[Config], error) {
+	return reload.New(path, Load, log)
+}
+
+// validate rejects a config that would make every ad invalid or contain blank ids.
+func (c *Config) validate() error {
+	if len(c.Categories) == 0 {
+		return errors.New("no categories")
+	}
+	if len(c.Neighborhoods) == 0 {
+		return errors.New("no neighborhoods")
+	}
+	for _, v := range c.Categories {
+		if v == "" {
+			return errors.New("blank category")
+		}
+	}
+	for _, n := range c.Neighborhoods {
+		if n.ID == "" {
+			return errors.New("neighborhood without id")
+		}
+	}
+	return nil
 }
 
 func (c *Config) index() {

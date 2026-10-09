@@ -97,7 +97,7 @@ make dev-stop     # stop the services (infrastructure keeps running)
 make reset        # stop services and wipe all data, start a fresh infrastructure
 ```
 
-Other targets: `make dev-status`, `make scenario` (scripted gRPC scenario), `make fmt`, `make lint` (what CI runs), `make test` (all unit tests, Go with `-race`), `make down` (stop infrastructure and delete its data). `make chaos` (fault injection, about 10 minutes, stops and starts services and containers) and `make load` (k6, needs `k6`) need the stack to be otherwise unused.
+Other targets: `make dev-status` (with a readiness column; health, `/metrics` and an optional Prometheus/Grafana profile are described in [Running locally](docs/guidelines/running-locally.md#health-logs-metrics)), `make scenario` (scripted gRPC scenario), `make fmt`, `make lint` (what CI runs), `make test` (all unit tests, Go with `-race`), `make down` (stop infrastructure and delete its data). `make chaos` (fault injection, about 10 minutes, stops and starts services and containers) and `make load` (k6, needs `k6`) need the stack to be otherwise unused.
 
 Calling the API by hand through Envoy (`:8080`) with a dev token for a seeded user (`user-1` .. `user-4`):
 

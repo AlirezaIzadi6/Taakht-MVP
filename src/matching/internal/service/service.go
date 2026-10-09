@@ -11,6 +11,7 @@ import (
 
 	matchingv1 "github.com/taakht/taakht/gen/taakht/matching/v1"
 	"github.com/taakht/taakht/libs/goplatform/identity"
+	"github.com/taakht/taakht/libs/goplatform/reload"
 	"github.com/taakht/taakht/src/matching/internal/geo"
 	"github.com/taakht/taakht/src/matching/internal/index"
 	"github.com/taakht/taakht/src/matching/internal/match"
@@ -26,6 +27,8 @@ type Service struct {
 	matchingv1.UnimplementedMatchingServiceServer
 	DB  index.Querier
 	Geo geo.Map
+	// GeoSource, when set, supplies the (reloadable) neighborhood map and takes precedence over Geo.
+	GeoSource *reload.Reloadable[geo.Map]
 }
 
 func clampLimit(n int32) int {
@@ -52,7 +55,7 @@ func (s *Service) Search(ctx context.Context, req *matchingv1.SearchRequest) (*m
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
-	return toResponse(match.RankBrowse(s.Geo, crit, cands, clampLimit(req.GetLimit()))), nil
+	return toResponse(match.RankBrowse(s.geoMap(), crit, cands, clampLimit(req.GetLimit()))), nil
 }
 
 func (s *Service) FindMatches(ctx context.Context, req *matchingv1.FindMatchesRequest) (*matchingv1.SearchResponse, error) {
@@ -83,7 +86,7 @@ func (s *Service) FindMatches(ctx context.Context, req *matchingv1.FindMatchesRe
 	if err != nil {
 		return nil, fmt.Errorf("find matches: %w", err)
 	}
-	return toResponse(match.RankTwoSided(s.Geo, me, cands, clampLimit(req.GetLimit()))), nil
+	return toResponse(match.RankTwoSided(s.geoMap(), me, cands, clampLimit(req.GetLimit()))), nil
 }
 
 func toResponse(scored []match.Scored) *matchingv1.SearchResponse {
@@ -92,4 +95,11 @@ func toResponse(scored []match.Scored) *matchingv1.SearchResponse {
 		resp.Candidates = append(resp.Candidates, &matchingv1.Candidate{Ad: m.Ad, Score: m.Score})
 	}
 	return resp
+}
+
+func (s *Service) geoMap() geo.Map {
+	if s.GeoSource != nil {
+		return *s.GeoSource.Get()
+	}
+	return s.Geo
 }

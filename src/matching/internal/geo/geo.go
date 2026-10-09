@@ -4,8 +4,11 @@ package geo
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
+
+	"github.com/taakht/taakht/libs/goplatform/reload"
 )
 
 type Neighborhood struct {
@@ -32,9 +35,27 @@ func Load(path string) (Map, error) {
 	}
 	m := Map{}
 	for _, n := range cfg.Neighborhoods {
+		if n.ID == "" {
+			return nil, fmt.Errorf("eligibility file: neighborhood without id")
+		}
+		if n.Lat < -90 || n.Lat > 90 || n.Lon < -180 || n.Lon > 180 {
+			return nil, fmt.Errorf("eligibility file: neighborhood %q has coordinates out of range", n.ID)
+		}
 		m[n.ID] = n
 	}
 	return m, nil
+}
+
+// LoadReloadable loads the eligibility file and returns a holder that main refreshes when the file changes.
+// The loader's validation (Load) decides whether a changed file is accepted.
+func LoadReloadable(path string, log *slog.Logger) (*reload.Reloadable[Map], error) {
+	return reload.New(path, func(p string) (*Map, error) {
+		m, err := Load(p)
+		if err != nil {
+			return nil, err
+		}
+		return &m, nil
+	}, log)
 }
 
 const earthRadiusKm = 6371.0

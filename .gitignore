@@ -71,3 +71,6 @@ tmp/
 
 # k6 load tests
 tests/load/.tokens.json
+
+# Rendered by scripts/gen-envoy-config.sh (Envoy config + JWT key set)
+deploy/envoy/

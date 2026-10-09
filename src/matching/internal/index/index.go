@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"google.golang.org/protobuf/proto"
 
 	adv1 "github.com/taakht/taakht/gen/taakht/ad/v1"
+	"github.com/taakht/taakht/libs/goplatform/housekeeping"
 )
 
 // Querier is satisfied by both pgx.Tx and *pgxpool.Pool.
@@ -75,6 +77,29 @@ WHERE ad_index.last_seq < EXCLUDED.last_seq`, adID, seq)
 	}
 	return tag.RowsAffected() == 1, nil
 }
+
+// TombstonePrune builds the housekeeping rule that deletes tombstones (removed rows) older than retention.
+//
+// Tradeoff: a tombstone is what stops a replayed older event from resurrecting a removed ad (the replayed
+// event has a seq at or below the tombstone's last_seq). Once the tombstone is gone, a replay of an
+// AdPublished/AdEdited that is still in Kafka would index the ad again. The retention must therefore exceed
+// the retention of the ad.events topic (and any planned offset reset) by a wide margin.
+func TombstonePrune(retention time.Duration) housekeeping.Prune {
+	return housekeeping.Prune{
+		Name:      EnvTombstoneRetention,
+		Retention: retention,
+		SQL: `DELETE FROM ad_index WHERE ad_id IN (
+			SELECT ad_id FROM ad_index
+			WHERE removed AND removed_at IS NOT NULL AND removed_at < now() - ($1 * interval '1 second')
+			LIMIT $2 FOR UPDATE SKIP LOCKED)`,
+	}
+}
+
+// Tombstone retention settings.
+const (
+	EnvTombstoneRetention     = "TOMBSTONE_RETENTION"
+	DefaultTombstoneRetention = 7 * 24 * time.Hour
+)
 
 // Get returns the indexed ad, or nil when it is not indexed (a tombstone counts as not indexed).
 func Get(ctx context.Context, q Querier, adID string) (*adv1.Ad, error) {

@@ -207,6 +207,60 @@ public class OutboxAndIdentityTests
         Assert.Equal(InternalAuth.Token, headers.GetValue(InternalAuth.Header));
     }
 
+    private static IDisposable Env(params (string Key, string Value)[] vars)
+    {
+        var map = vars.ToDictionary(v => v.Key, v => v.Value);
+        return InternalAuth.Use(InternalAuthConfig.From(k => map.GetValueOrDefault(k)));
+    }
+
+    [Fact]
+    public void Rotation_accepts_current_and_previous_but_clients_send_current()
+    {
+        using var _ = Env(("INTERNAL_AUTH_TOKEN", "new-token"), ("INTERNAL_AUTH_TOKEN_PREVIOUS", "old-token"));
+        Assert.True(CurrentUser.IsSystem(Ctx(SystemIdentities.Swap, "new-token")));
+        Assert.True(CurrentUser.IsSystem(Ctx(SystemIdentities.Swap, "old-token")));
+        Assert.False(CurrentUser.IsSystem(Ctx(SystemIdentities.Swap, "older")));
+        Assert.False(CurrentUser.IsSystem(Ctx(SystemIdentities.Swap, "")));
+        Assert.Equal("new-token", InternalAuth.TokenFor(SystemIdentities.Swap));
+        Assert.True(InternalAuth.RotationActive);
+    }
+
+    [Fact]
+    public void Previous_token_stops_working_when_the_window_closes()
+    {
+        using var _ = Env(("INTERNAL_AUTH_TOKEN", "new-token"));
+        Assert.False(CurrentUser.IsSystem(Ctx(SystemIdentities.Swap, "old-token")));
+        Assert.False(InternalAuth.RotationActive);
+    }
+
+    [Fact]
+    public void Per_identity_tokens_scope_each_system_identity()
+    {
+        using var _ = Env(
+            ("INTERNAL_AUTH_TOKEN", "shared"), ("INTERNAL_AUTH_TOKEN_PREVIOUS", "shared-old"),
+            ("INTERNAL_AUTH_TOKEN_SWAP", "swap-tok"), ("INTERNAL_AUTH_TOKEN_NEGOTIATION", "neg-tok"));
+        Assert.True(CurrentUser.IsSystem(Ctx(SystemIdentities.Swap, "swap-tok")));
+        Assert.False(CurrentUser.IsSystem(Ctx(SystemIdentities.Swap, "neg-tok")));
+        Assert.False(CurrentUser.IsSystem(Ctx(SystemIdentities.Swap, "shared")));
+        Assert.False(CurrentUser.IsSystem(Ctx(SystemIdentities.Swap, "shared-old")));
+        Assert.True(CurrentUser.IsSystem(Ctx(SystemIdentities.Negotiation, "neg-tok")));
+        Assert.False(CurrentUser.IsSystem(Ctx(SystemIdentities.Negotiation, "swap-tok")));
+        Assert.Equal(StatusCode.Unauthenticated,
+            Assert.Throws<RpcException>(() => CurrentUser.Id(Ctx(SystemIdentities.Swap, "neg-tok"))).StatusCode);
+        Assert.Equal("swap-tok", InternalAuth.TokenFor(SystemIdentities.Swap));
+        Assert.Equal("neg-tok", InternalAuth.TokenFor(SystemIdentities.Negotiation));
+    }
+
+    [Fact]
+    public async Task Unscoped_identity_falls_back_to_the_shared_token_and_the_client_sends_the_scoped_one()
+    {
+        using var _ = Env(("INTERNAL_AUTH_TOKEN", "shared"), ("INTERNAL_AUTH_TOKEN_SWAP", "swap-tok"));
+        Assert.True(CurrentUser.IsSystem(Ctx(SystemIdentities.Negotiation, "shared")));
+        Assert.False(CurrentUser.IsSystem(Ctx(SystemIdentities.Negotiation, "swap-tok")));
+        Assert.Equal("swap-tok", (await CapturedHeaders(SystemIdentities.Swap)).GetValue(InternalAuth.Header));
+        Assert.Equal("shared", (await CapturedHeaders(SystemIdentities.Negotiation)).GetValue(InternalAuth.Header));
+    }
+
     private static Task<Metadata> CapturedHeaders(string? ambientUser, string? explicitUser = null)
     {
         Metadata? seen = null;

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	commonv1 "github.com/taakht/taakht/gen/taakht/common/v1"
+	"github.com/taakht/taakht/libs/goplatform/observe"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -31,6 +32,7 @@ func Add(ctx context.Context, tx pgx.Tx, topic, key string, msg proto.Message) e
 		AggregateId: key,
 		OccurredAt:  timestamppb.Now(),
 		Payload:     payload,
+		RequestId:   observe.RequestID(ctx), // the ambient request id, so consumers can log under the same id
 	}
 	raw, err := proto.Marshal(env)
 	if err != nil {
@@ -47,10 +49,17 @@ func Add(ctx context.Context, tx pgx.Tx, topic, key string, msg proto.Message) e
 const (
 	pollInterval = 200 * time.Millisecond
 	batchSize    = 100
+	// standbyRetry is how often an instance that does not hold the relay lock tries to take it.
+	standbyRetry = 3 * time.Second
 )
 
+// relayLockSQL names the lock after the database, which is the service: <service>-outbox-relay.
+const relayLockSQL = `SELECT pg_try_advisory_lock(hashtext(current_database() || '-outbox-relay'))`
+
 // RunRelay publishes unpublished outbox rows in creation order until ctx is cancelled.
-// Delivery is at-least-once.
+// Delivery is at-least-once. Only one instance per database relays at a time: the active one holds a
+// session-level advisory lock on a dedicated connection (released by Postgres if the instance or the connection
+// dies); the others stand by, retry every few seconds and take over when the holder is gone.
 func RunRelay(ctx context.Context, pool *pgxpool.Pool, brokers []string) error {
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(brokers...),
@@ -62,14 +71,61 @@ func RunRelay(ctx context.Context, pool *pgxpool.Pool, brokers []string) error {
 	}
 	defer cl.Close()
 
+	for ctx.Err() == nil {
+		lock, err := acquireRelayLock(ctx, pool)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			slog.Error("outbox relay: cannot check the relay lock", "err", err)
+		}
+		if lock == nil {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(standbyRetry):
+			}
+			continue
+		}
+		slog.Info("outbox relay: lock acquired, relaying")
+		relayWhileLocked(ctx, pool, cl, lock)
+		_ = lock.Close(context.WithoutCancel(ctx)) // also releases the lock
+	}
+	return nil
+}
+
+// acquireRelayLock returns the dedicated connection holding the lock, or nil when another instance has it.
+func acquireRelayLock(ctx context.Context, pool *pgxpool.Pool) (*pgx.Conn, error) {
+	pc, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	conn := pc.Hijack() // not returned to the pool: the lock lives as long as this session
+	var got bool
+	if err := conn.QueryRow(ctx, relayLockSQL).Scan(&got); err != nil || !got {
+		_ = conn.Close(context.WithoutCancel(ctx))
+		return nil, err
+	}
+	return conn, nil
+}
+
+// relayWhileLocked relays until ctx ends or the lock connection is lost.
+func relayWhileLocked(ctx context.Context, pool *pgxpool.Pool, cl *kgo.Client, lock *pgx.Conn) {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
+		// A dead lock connection means the lock is gone and another instance may be relaying.
+		if _, err := lock.Exec(ctx, `SELECT 1`); err != nil {
+			if ctx.Err() == nil {
+				slog.Error("outbox relay: lost the relay lock connection, standing by", "err", err)
+			}
+			return
+		}
 		for {
 			n, err := relayOnce(ctx, pool, cl)
 			if err != nil {
 				if ctx.Err() != nil {
-					return nil
+					return
 				}
 				slog.Error("outbox relay failed", "err", err)
 				break
@@ -80,7 +136,7 @@ func RunRelay(ctx context.Context, pool *pgxpool.Pool, brokers []string) error {
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		case <-ticker.C:
 		}
 	}
@@ -126,5 +182,6 @@ func relayOnce(ctx context.Context, pool *pgxpool.Pool, cl *kgo.Client) (int, er
 	if err := tx.Commit(ctx); err != nil {
 		return 0, err
 	}
+	observe.OutboxPublished.Add(float64(len(recs)))
 	return len(recs), nil
 }

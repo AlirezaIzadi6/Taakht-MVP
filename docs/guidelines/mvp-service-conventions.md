@@ -19,16 +19,33 @@ Services run on the host (`go run`, `dotnet run`), not in containers, during the
 
 ## Ports and environment
 
-| Service | gRPC port | Database |
-|---|---|---|
-| ad | 9001 | `ad` |
-| matching | 9002 | `matching` |
-| negotiation | 9003 | `negotiation` |
-| swap | 9004 | `swap` |
+| Service | gRPC port | Health HTTP port (`HEALTH_ADDR`) | Database |
+|---|---|---|---|
+| ad | 9001 | 9101 | `ad` |
+| matching | 9002 | 9102 | `matching` |
+| negotiation | 9003 | 9103 | `negotiation` |
+| swap | 9004 | 9104 | `swap` |
 
 gRPC reflection is off unless `TAAKHT_GRPC_REFLECTION=on` (Go) or the Development environment (.NET); `scripts/dev.sh` turns it on. Dev-only RPCs need `ENABLE_DEV_ENDPOINTS=true` or Development.
 
 Environment variables (with these defaults for local runs): `DATABASE_URL=postgres://taakht:taakht@127.0.0.1:5432/<db>?sslmode=disable` (the .NET services convert it to a connection string or use `ConnectionStrings__Default`), `KAFKA_BROKERS=127.0.0.1:9094`, `GRPC_ADDR=:<port>`, `AD_ADDR=127.0.0.1:9001`, `ELIGIBILITY_FILE=../../config/eligibility.json` (resolve relative to the working directory; also accept an absolute path). Swap only: `PAYMENT_DEADLINE`, code default `1h` (the design value; `scripts/dev.sh` exports `2m` for local runs, so `make dev` and the demo use 2 minutes; a Go-style duration, parse `1h`, `2m`, `30s`; startup fails unless it is greater than zero and at most `30d`, and absurdly large values are rejected before they can overflow). Swap only: `ENABLE_DEV_ENDPOINTS=true` (or the Development environment) enables `SimulateLockerFeePaid`. Negotiation only: `AGREEMENT_PENDING_TIMEOUT` (default `10m`) (how long a negotiation may wait in `AGREEMENT_PENDING` before each recovery step of the sweeper, see the architecture document; durations accept the `d` suffix; startup fails below `10s` or above `30d`), `NEGOTIATION_CAP` (default `10` live negotiations per ad). All services: `INTERNAL_AUTH_TOKEN` (shared secret that proves `system:*` callers; default `dev-internal-token`, DEV ONLY, with a startup warning; `scripts/dev.sh` exports it). All services: `DB_MAX_CONNS=20` and `DB_MIN_CONNS=2` (.NET default 5) bound the database pool (pgx `MaxConns`/`MinConns`, Npgsql `Maximum Pool Size`/`Minimum Pool Size`; a `pool_max_conns` / `Maximum Pool Size` written into `DATABASE_URL` is used only when the variable is unset; startup fails on a non-integer, a max below 1, or a min above the max). Four pools of 20 plus admin and test sessions must stay under the Postgres limit (`max_connections=200` in `deploy/docker-compose.yml`). .NET only: `DB_ACQUIRE_TIMEOUT=10s` (how long a request waits for a free pooled connection, 1 s to 5 min, written as Npgsql `Timeout`). Go only: `REQUEST_TIMEOUT=15s` (deadline given to a unary call that arrives without one, so a request waiting for a pooled connection fails fast; a Go duration). Use `127.0.0.1`, not `localhost`, for host-run services (see [running locally](running-locally.md)); the platform libraries rewrite a database host of exactly `localhost` to `127.0.0.1`.
+
+## Operability
+
+Every service exposes health, structured logs, a request id and Prometheus metrics (design: [architecture, Operability](../architecture/mvp-architecture.md#operability); how to use it: [Running locally](running-locally.md#health-logs-metrics)). Environment variables, same in Go and .NET:
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `HEALTH_ADDR` | `127.0.0.1:9101..9104` (table above) | `host:port` of the plain HTTP listener with `/healthz` (liveness), `/readyz` (readiness; 503 when a check fails) and `/metrics` (Prometheus text). Loopback by default; `0.0.0.0` exposes unauthenticated metrics to the network. The listener is HTTP/1.1 on its own port because the gRPC port serves cleartext HTTP/2 only. `scripts/dev.sh` sets it per service (`HEALTH_BIND` changes the host part). A listen failure stops the service. |
+| `CONSUMER_CONCURRENCY` | `1` (`scripts/dev.sh` sets `4`) | Partitions a consumer handles in parallel; order is kept per partition (per key). Higher values were not load-tested; matching serializes its index updates with an advisory lock so parallel partitions cannot lose a `MatchFound`. |
+| `LOG_FORMAT` | `text` | `json` writes one JSON object per line: `ts` (UTC), `level`, `service`, `msg`, `request_id`, `user_id` (when known) plus the event's fields (`method`, `code`, `duration_ms` for a call; `type`, `event_id` for a consumed event). Anything else is readable text. |
+| `LOG_LEVEL` | `info` | Minimum level (`debug`, `info`, `warn`, `error`; .NET also `trace`, `critical`). |
+| `READY_OUTBOX_AGE` | `60s` | Readiness fails when the oldest unpublished outbox row is older than this (relay stuck or Kafka unreachable). A Go duration in Go, `90s`/`10m` in .NET. |
+| `READY_CONSUMER_STALE` | `60s` | .NET only: readiness fails when the consumer has not polled for this long. The Go services check group membership instead. |
+
+Health is the standard gRPC health service on the gRPC port too (`grpc.health.v1.Health/Check`, exempt from `x-user-id`): service `""` and `liveness` are SERVING while the process is up, `readiness` is SERVING only while Postgres (`SELECT 1`, 2 s), the consumer and the outbox are healthy. Never put secrets, tokens or user text in a log line or a metric label; ids only. Metric labels are limited to gRPC method and code, pool state, consumer result and housekeeping table.
+
+**Request id.** The metadata key `x-request-id` (1..128 printable ASCII bytes; anything else is replaced by a fresh UUID) is set by Envoy for every REST call. The server interceptor of each platform library makes it ambient and logs it, the client interceptors forward it (`RequestContext` in .NET, `observe.RequestIDClientInterceptor` in Go), `outbox.Add`/`Outbox.Wrap` store it in `Envelope.request_id` (field 6) and the consumers restore it before running a handler. Jobs without a caller (sweepers, housekeeping) have no request id. In Go, log with the `*Context` variants of `slog` (`slog.InfoContext(ctx, ...)`) to get `request_id` and `user_id` in a handler's lines.
 
 ## Overload
 
@@ -54,7 +71,7 @@ Database overload is a retryable `UNAVAILABLE` (503 at the edge) with a short me
 
 ## Events
 
-Topics: `ad.events`, `matching.events`, `negotiation.events`, `swap.events`. Each service publishes only to its own topic. Value = `taakht.common.v1.Envelope` (protobuf) whose `type` is the payload's full proto name (e.g. `taakht.swap.v1.SwapCompleted`) and `aggregate_id` is also the Kafka key. Consumers ignore envelope types they do not know.
+Topics: `ad.events`, `matching.events`, `negotiation.events`, `swap.events`. Each service publishes only to its own topic. Value = `taakht.common.v1.Envelope` (protobuf; `request_id` carries the request id of the call that caused the event) whose `type` is the payload's full proto name (e.g. `taakht.swap.v1.SwapCompleted`) and `aggregate_id` is also the Kafka key. Consumers ignore envelope types they do not know.
 
 **Outbox** (every publishing service has this table; a business change and its event are written in the same transaction):
 
@@ -99,7 +116,7 @@ CREATE TABLE dead_letter (
 );
 ```
 
-The permanent-skip path inserts the `processed_events` row and the `dead_letter` row in one statement. An event whose id is not a UUID cannot be keyed and is only logged. There is no replay tool: an operator decodes `payload` (an `Envelope`) and re-applies it by hand.
+The permanent-skip path inserts the `processed_events` row and the `dead_letter` row in one statement. An event whose id is not a UUID cannot be keyed and is only logged. `tools/dlq` lists, shows, replays and purges these rows (see [Running locally](running-locally.md#operations-dead-letters)); replay clears the consumer's `processed_events` marker for the event, otherwise the consumer would skip it as a duplicate.
 
 Consumer groups are named after the service (`ad`, `matching`, `negotiation`, `swap`); start from the earliest offset.
 
@@ -111,6 +128,15 @@ Consumer groups are named after the service (`ad`, `matching`, `negotiation`, `s
 | `PROCESSED_EVENTS_RETENTION` | `7d` | `processed_events` rows older than this (by `processed_at`) are deleted. |
 | `DEAD_LETTER_RETENTION` | `30d` | `dead_letter` rows older than this (by `created_at`) are deleted. |
 | `PRUNE_INTERVAL` | `10m` | Time between sweeps. |
+
+Two services add a retention of their own to the same job (same syntax, same `1m` minimum, validated at startup):
+
+| Env var | Service | Default | Meaning |
+|---|---|---|---|
+| `TOMBSTONE_RETENTION` | matching | `7d` | Tombstone rows (`removed = true`) in `ad_index` older than this (by `removed_at`) are deleted. A tombstone is what stops a replayed older `ad.events` message from re-indexing a removed ad, so deleting it re-opens that replay window: keep this retention longer than the retention of the `ad.events` topic and than any planned offset reset. Live rows are never pruned. |
+| `AD_LOCK_RETENTION` | ad | `30d` | `ad_lock` rows whose swap finished (state `released` or `closed`) and settled (`settled_at`, set by a trigger) longer ago than this are deleted. Rows still `locked` are never deleted. `ad_version` is deliberately never pruned: approvals and `GetAd(version)` refer to exact versions and the rows are the audit history of an ad. The only effect of pruning a lock row is that a `LockAds` retry for a swap finished that long ago would no longer be recognised as a repeat. |
+
+Eligibility config (`ELIGIBILITY_FILE`) is re-read in ad and matching when its modification time or size changes (checked every 30 s, no signal needed). A file that fails to parse or validate (no categories or neighborhoods, blank ids, coordinates out of range) is rejected: the previous config stays in force and an error is logged once per file change. Startup still fails on an invalid file.
 
 Durations accept the usual units (`90s`, `10m`, `24h`) and a `d` suffix (`7d`, `1d12h`); anything below `1m`, unparseable or implausibly large (more than 36500 days) fails startup. Tradeoff: deleting a `processed_events` row ends the idempotency guarantee for that event, so a redelivery after the retention would run the handler again. Keep `PROCESSED_EVENTS_RETENTION` much larger than any realistic redelivery window (Kafka topic retention, consumer-group offset resets, manual replays); lowering it saves space at the cost of weaker deduplication.
 
@@ -133,6 +159,13 @@ func WithUserID(ctx context.Context, id string) context.Context // outgoing ctx 
 func Add(ctx context.Context, tx pgx.Tx, topic, key string, msg proto.Message) error // wraps msg in an Envelope
 func RunRelay(ctx context.Context, pool *pgxpool.Pool, brokers []string) error
 
+// package observe (logging, request id, health, metrics)
+func SetupLogging(service string) *slog.Logger // LOG_FORMAT, LOG_LEVEL; call first in main
+func New(Options) *Obs                          // health checks; (*Obs).Serve(ctx) runs the HTTP listener; server.Run registers grpc.health.v1
+func RegisterDB(pool *pgxpool.Pool)             // pool and outbox gauges
+func RequestID(ctx context.Context) string
+func RequestIDClientInterceptor() grpc.UnaryClientInterceptor
+
 // package consume
 type Handler func(ctx context.Context, tx pgx.Tx, env *commonv1.Envelope) error
 func Run(ctx context.Context, pool *pgxpool.Pool, brokers []string, group string, topics []string, handlers map[string]Handler) error // key = envelope type
@@ -140,7 +173,7 @@ func Run(ctx context.Context, pool *pgxpool.Pool, brokers []string, group string
 
 Kafka client: `github.com/twmb/franz-go`. gRPC server helper: a small `server.Run(ctx, addr, register func(*grpc.Server))` with graceful shutdown and the interceptor is welcome.
 
-**.NET** (`libs/dotnet/Taakht.Platform`, namespace `Taakht.Platform`): the same pieces with idiomatic names: `Migrator.MigrateAsync(NpgsqlDataSource, Assembly)` (embedded resources), a gRPC server interceptor + client interceptor for `x-user-id` and `CurrentUser.Id(ServerCallContext)`, `Outbox.AddAsync(NpgsqlConnection, NpgsqlTransaction, topic, key, IMessage)`, an `OutboxRelay : BackgroundService`, and `EventConsumer : BackgroundService` taking `(group, topics, Dictionary<string, Func<NpgsqlConnection, NpgsqlTransaction, Envelope, Task>>)`. Kafka client: `Confluent.Kafka`. Registration helpers: `services.AddTaakhtPlatform(configuration)`.
+**.NET** (`libs/dotnet/Taakht.Platform`, namespace `Taakht.Platform`): the same pieces with idiomatic names: `Migrator.MigrateAsync(NpgsqlDataSource, Assembly)` (embedded resources), a gRPC server interceptor + client interceptor for `x-user-id` and `CurrentUser.Id(ServerCallContext)`, `Outbox.AddAsync(NpgsqlConnection, NpgsqlTransaction, topic, key, IMessage)`, an `OutboxRelay : BackgroundService`, and `EventConsumer : BackgroundService` taking `(group, topics, Dictionary<string, Func<NpgsqlConnection, NpgsqlTransaction, Envelope, Task>>)`. Kafka client: `Confluent.Kafka`. Registration helpers: `services.AddTaakhtPlatform(configuration)`, `builder.AddTaakhtObservability(service, defaultHealthPort)` before it and `app.MapTaakhtObservability()` after `Build` (logging, request id and call metrics interceptors, health checks, `/metrics`), and `RequestContext` for the ambient request id.
 
 ## Quality bar
 

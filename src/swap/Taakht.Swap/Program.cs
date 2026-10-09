@@ -10,6 +10,9 @@ using Taakht.Swap.Infrastructure;
 var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
 
+// Operability: logging, request id, health (grpc.health.v1, /healthz, /readyz) and /metrics on HEALTH_ADDR (default 127.0.0.1:9104).
+builder.AddTaakhtObservability("swap", 9104);
+
 const string DefaultDatabaseUrl = "postgres://taakht:taakht@127.0.0.1:5432/swap?sslmode=disable";
 if (config["DATABASE_URL"] is null && config.GetConnectionString("Default") is null)
 {
@@ -44,12 +47,15 @@ builder.Services.AddHostedService(sp => new EventConsumer(
     sp.GetRequiredService<KafkaOptions>(),
     "swap",
     ["negotiation.events"],
-    new Dictionary<string, Func<NpgsqlConnection, NpgsqlTransaction, Taakht.Common.V1.Envelope, Task>>
+    new Dictionary<string, Func<NpgsqlConnection, NpgsqlTransaction, Taakht.Common.V1.Envelope, Task>>(),
+    sp.GetRequiredService<ILogger<EventConsumer>>(),
+    // Runs outside the dedupe transaction (it makes a remote LockAds call and uses its own short transactions); fully idempotent:
+    // one swap row per negotiation, an idempotent LockAds by swap id, state-checked transitions.
+    new Dictionary<string, Func<Taakht.Common.V1.Envelope, CancellationToken, Task>>
     {
-        [AgreementReached.Descriptor.FullName] = (_, _, env) =>
-            sp.GetRequiredService<SwapWorkflow>().HandleAgreementReachedAsync(AgreementReached.Parser.ParseFrom(env.Payload), CancellationToken.None),
-    },
-    sp.GetRequiredService<ILogger<EventConsumer>>()));
+        [AgreementReached.Descriptor.FullName] = (env, ct) =>
+            sp.GetRequiredService<SwapWorkflow>().HandleAgreementReachedAsync(AgreementReached.Parser.ParseFrom(env.Payload), ct),
+    }));
 
 builder.Services.AddGrpc(o =>
 {
@@ -65,6 +71,7 @@ var app = builder.Build();
 await app.Services.MigrateAsync(typeof(Program).Assembly);
 
 app.MapGrpcService<SwapGrpcService>();
+app.MapTaakhtObservability();
 if (app.Environment.IsDevelopment())
 {
     app.MapGrpcReflectionService();

@@ -13,6 +13,10 @@ Clients authenticate with JWTs (in phase 1 `AuthProvider` is a mock that issues 
 
 We will verify JWTs (signature, expiry, issuer, audience) in Envoy with the `jwt_authn` filter and reject invalid requests before they reach a service. Envoy forwards only the claims services need (initially the user id as `x-user-id`) as gRPC metadata, using `claim_to_headers`. Services read the user identity only through a shared interceptor and propagate it unchanged on outgoing calls. Tokens are short-lived because `jwt_authn` has no revocation.
 
+## MVP stance
+
+Envoy validates HS256 tokens against a key set (`deploy/envoy/jwks.json`) that `scripts/gen-envoy-config.sh` generates from `JWT_SIGNING_KEY` when `make up` runs; the file is git-ignored and the repo no longer carries the key in `gateway/envoy.yaml`. The default is still the public dev key (the same default as `tools/devtoken`) so a clean clone works, therefore any shared environment must set `JWT_SIGNING_KEY`. The set may hold several keys with a `kid`, which gives key rotation without invalidating live tokens (`JWT_SIGNING_KEY_PREVIOUS`; procedure in [Running locally](../../guidelines/running-locally.md#edge-operations-envoy)). HS256 is symmetric, so every holder of the key can mint tokens; this is acceptable for the MVP only. Edge hardening around it: rbac denies `system:` subjects, a first filter strips client identity headers, CORS is limited to an allow-list, request bodies are capped at 1 MiB, routes time out after 15 s and only GETs are retried. Tests: `make gateway-test`.
+
 ## Options considered
 
 1. **Verify at Envoy, forward only needed claims (chosen)** - one verification point for both languages, invalid requests dropped early, services stay simple. Cost: services trust the metadata, so its trustworthiness depends on how callers are authenticated (see the service-to-service ADR).

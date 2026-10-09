@@ -685,8 +685,7 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
         Assert.Equal(NegV1.NegotiationStatus.Cancelled, NegV1.NegotiationClosed.Parser.ParseFrom(closed.Payload).Status);
         Assert.Equal(0, await h.Service.SweepAgreementPendingAsync(default));
 
-        // A late SwapRejected is ignored (not pending any more); so is a late lock event, which must not cancel
-        // anybody: that is the documented residual risk, logged for an operator.
+        // A late SwapRejected is ignored (not pending any more).
         await using (var conn = await h.Db.OpenConnectionAsync())
         await using (var tx = await conn.BeginTransactionAsync())
         {
@@ -694,10 +693,50 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
             await tx.CommitAsync();
         }
 
-        await ApplyLockAsync(h, LockEvent(id, a.AdId, b.AdId));
         Assert.Equal(NegotiationStatus.Cancelled, await StatusOfAsync(h, id, "user-1"));
-        Assert.Equal(NegotiationService.AgreementTimedOutReason, (await h.Service.GetAsync("user-1", id, default)).Negotiation.CancelReason);
-        Assert.Equal(NegotiationStatus.Open, await StatusOfAsync(h, other, "user-3"));
+
+        // A late ExclusiveLockAcquired proves the swap holds the ads: the negotiation is AGREED again, the live competitor
+        // is cancelled, and nothing new is emitted for the winner.
+        var closedBefore = (await h.OutboxAsync(id)).Count;
+        var lockEvent = LockEvent(id, a.AdId, b.AdId);
+        await ApplyLockAsync(h, lockEvent);
+        var reopened = (await h.Service.GetAsync("user-1", id, default)).Negotiation;
+        Assert.Equal(NegotiationStatus.Agreed, reopened.Status);
+        Assert.Equal(string.Empty, reopened.CancelReason);
+        Assert.Equal(closedBefore, (await h.OutboxAsync(id)).Count);
+        Assert.Equal(NegotiationStatus.Cancelled, await StatusOfAsync(h, other, "user-3"));
+        Assert.Equal(EventHandlers.CancelReasonLockedElsewhere, (await h.Service.GetAsync("user-3", other, default)).Negotiation.CancelReason);
+
+        // Redelivery is a no-op, and a later SwapCancelled cancels it like any agreed negotiation.
+        await ApplyLockAsync(h, lockEvent);
+        Assert.Equal(NegotiationStatus.Agreed, await StatusOfAsync(h, id, "user-1"));
+        await ApplyCancelledAsync(h, new Taakht.Swap.V1.SwapCancelled { SwapId = lockEvent.SwapId, NegotiationId = id.ToString(), Reason = "locker fee not paid in time" });
+        Assert.Equal(NegotiationStatus.Cancelled, await StatusOfAsync(h, id, "user-1"));
+    }
+
+    [Fact]
+    public async Task LateLockEventDoesNotReopenANegotiationCancelledForAnotherReason()
+    {
+        if (Create() is not { } h)
+        {
+            return;
+        }
+
+        await ClearPendingAsync(h);
+        var (id, a, b) = await PendingAsync(h, "user-1", "user-2");
+        var swapRejected = new Taakht.Swap.V1.SwapRejected { NegotiationId = id.ToString(), Reason = "ad is locked" };
+        await using (var conn = await h.Db.OpenConnectionAsync())
+        await using (var tx = await conn.BeginTransactionAsync())
+        {
+            await h.Events.OnSwapRejectedAsync(conn, tx, swapRejected);
+            await tx.CommitAsync();
+        }
+
+        Assert.Equal(NegotiationStatus.Cancelled, await StatusOfAsync(h, id, "user-1"));
+        await ApplyLockAsync(h, LockEvent(id, a.AdId, b.AdId));
+        var n = (await h.Service.GetAsync("user-1", id, default)).Negotiation;
+        Assert.Equal(NegotiationStatus.Cancelled, n.Status);
+        Assert.Equal("ad is locked", n.CancelReason);
     }
 
     [Fact]

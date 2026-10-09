@@ -62,8 +62,13 @@ proto: ## Regenerate Go code from api/proto (.NET generates at build time via Gr
 		--go-grpc_out=gen/go --go-grpc_opt=paths=source_relative \
 		$$(find api/proto -name '*.proto')
 
-up: ## Start local infrastructure (Postgres, Kafka, Envoy gateway on :8080)
-	docker compose -f deploy/docker-compose.yml up -d --wait
+# Local dev keeps the dev-only /v1/dev/ edge route (the demo needs it); set ENVOY_ENABLE_DEV_ROUTES=false to harden.
+export ENVOY_ENABLE_DEV_ROUTES ?= true
+
+up: ## Start local infrastructure (Postgres, Kafka, Envoy gateway on :8080); renders the Envoy config first
+	@changed=$$(scripts/gen-envoy-config.sh) || exit 1; \
+	docker compose -f deploy/docker-compose.yml up -d --wait || exit 1; \
+	if [ "$$changed" = updated ]; then echo "Envoy config changed: restarting envoy"; docker compose -f deploy/docker-compose.yml restart envoy; fi
 
 down: ## Stop local infrastructure and delete its data
 	docker compose -f deploy/docker-compose.yml down -v
@@ -105,6 +110,11 @@ gateway-descriptor: ## Rebuild gateway/descriptor.binpb (Envoy transcoder) from 
 		api/proto/taakht/matching/v1/matching.proto \
 		api/proto/taakht/negotiation/v1/negotiation.proto \
 		api/proto/taakht/swap/v1/swap.proto
+
+.PHONY: gateway-test
+
+gateway-test: ## Edge tests (auth, CORS, limits, 404, dev route, retries) against the running gateway; needs make dev
+	@scripts/test-gateway.sh
 
 # ---------- MVP: REST demo ----------
 .PHONY: demo

@@ -13,6 +13,7 @@ import (
 	commonv1 "github.com/taakht/taakht/gen/taakht/common/v1"
 	matchingv1 "github.com/taakht/taakht/gen/taakht/matching/v1"
 	"github.com/taakht/taakht/libs/goplatform/consume"
+	"github.com/taakht/taakht/libs/goplatform/reload"
 	"github.com/taakht/taakht/src/matching/internal/geo"
 	"github.com/taakht/taakht/src/matching/internal/index"
 	"github.com/taakht/taakht/src/matching/internal/match"
@@ -30,9 +31,18 @@ type Emit func(ctx context.Context, tx pgx.Tx, topic, key string, msg proto.Mess
 type Handler = consume.Handler
 
 type Handlers struct {
-	Geo  geo.Map
-	Emit Emit
-	Log  *slog.Logger
+	Geo geo.Map
+	// GeoSource, when set, supplies the (reloadable) neighborhood map and takes precedence over Geo.
+	GeoSource *reload.Reloadable[geo.Map]
+	Emit      Emit
+	Log       *slog.Logger
+}
+
+func (h *Handlers) geoMap() geo.Map {
+	if h.GeoSource != nil {
+		return *h.GeoSource.Get()
+	}
+	return h.Geo
 }
 
 // Map returns the handlers keyed by envelope type.
@@ -83,6 +93,9 @@ func onRemove[T any, P interface {
 	}
 }
 
+// matchLockKey serializes the index-and-match step of ApplySnapshot (transaction-scoped advisory lock).
+const matchLockKey int64 = 7_424_002
+
 // ApplySnapshot indexes a published snapshot (and matches it) or removes a non-published one. seq is the
 // event's per-ad sequence number (0 for events written before it existed).
 func (h *Handlers) ApplySnapshot(ctx context.Context, tx pgx.Tx, ad *adv1.Ad, seq int64) error {
@@ -93,6 +106,12 @@ func (h *Handlers) ApplySnapshot(ctx context.Context, tx pgx.Tx, ad *adv1.Ad, se
 		_, err := index.Remove(ctx, tx, ad.GetId(), seq)
 		return err
 	}
+	// Compatible ads that arrive together (parallel partitions, several instances) must see each other: without
+	// this lock both transactions upsert, neither sees the other's uncommitted row, and no MatchFound is made.
+	// The lock is held until commit, so the second transaction queries candidates after the first one is visible.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, matchLockKey); err != nil {
+		return err
+	}
 	applied, err := index.Upsert(ctx, tx, ad, seq)
 	if err != nil {
 		return err
@@ -100,6 +119,16 @@ func (h *Handlers) ApplySnapshot(ctx context.Context, tx pgx.Tx, ad *adv1.Ad, se
 	if !applied {
 		h.Log.Info("ignored stale ad event", "ad_id", ad.GetId(), "version", ad.GetVersion(), "seq", seq)
 		return nil
+	}
+	if seq > 0 {
+		// MatchFound is deduplicated per (ad, matched ad, seq of the ad's event): this event is newer than
+		// everything applied for the ad (an edit, or a re-add after a release or hide), so the pairs
+		// notified for the previous state no longer count. A redelivery of the same event is not applied
+		// (seq <= last_seq) and never reaches this point; legacy events without a seq keep the old
+		// once-per-pair behaviour.
+		if _, err := tx.Exec(ctx, `DELETE FROM notified_pair WHERE ad_id = $1`, ad.GetId()); err != nil {
+			return err
+		}
 	}
 	return h.notifyMatches(ctx, tx, ad)
 }
@@ -115,7 +144,7 @@ func (h *Handlers) notifyMatches(ctx context.Context, tx pgx.Tx, ad *adv1.Ad) er
 	if err != nil {
 		return err
 	}
-	for _, m := range match.RankTwoSided(h.Geo, ad, cands, MaxMatchesPerAd) {
+	for _, m := range match.RankTwoSided(h.geoMap(), ad, cands, MaxMatchesPerAd) {
 		tag, err := tx.Exec(ctx,
 			`INSERT INTO notified_pair (ad_id, matched_ad_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 			ad.GetId(), m.Ad.GetId())

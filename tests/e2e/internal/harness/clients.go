@@ -25,10 +25,10 @@ type Addrs struct {
 // AddrsFromEnv reads AD_ADDR, MATCHING_ADDR, NEGOTIATION_ADDR and SWAP_ADDR with the local defaults.
 func AddrsFromEnv() Addrs {
 	return Addrs{
-		Ad:          envOr("AD_ADDR", "localhost:9001"),
-		Matching:    envOr("MATCHING_ADDR", "localhost:9002"),
-		Negotiation: envOr("NEGOTIATION_ADDR", "localhost:9003"),
-		Swap:        envOr("SWAP_ADDR", "localhost:9004"),
+		Ad:          envOr("AD_ADDR", "127.0.0.1:9001"),
+		Matching:    envOr("MATCHING_ADDR", "127.0.0.1:9002"),
+		Negotiation: envOr("NEGOTIATION_ADDR", "127.0.0.1:9003"),
+		Swap:        envOr("SWAP_ADDR", "127.0.0.1:9004"),
 	}
 }
 

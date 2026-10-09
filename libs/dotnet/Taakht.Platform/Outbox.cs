@@ -19,6 +19,7 @@ public static class Outbox
             AggregateId = key,
             OccurredAt = Timestamp.FromDateTime(occurredAtUtc ?? DateTime.UtcNow),
             Payload = message.ToByteString(),
+            RequestId = RequestContext.Current ?? string.Empty, // the ambient request id, so consumers log under the same id
         };
     }
 

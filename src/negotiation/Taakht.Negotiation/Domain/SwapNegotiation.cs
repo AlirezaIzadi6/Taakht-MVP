@@ -304,6 +304,24 @@ public sealed class SwapNegotiation
         return true;
     }
 
+    /// <summary>
+    /// The swap took the lock after the sweeper had cancelled this negotiation for timing out: the swap holds the ads and is
+    /// authoritative, so the negotiation is agreed after all. Only a cancellation with exactly <paramref name="expectedReason"/>
+    /// is reopened; any other cancelled negotiation stays cancelled. Returns false otherwise.
+    /// </summary>
+    public bool ReopenCancelledAsAgreed(string expectedReason, DateTimeOffset now)
+    {
+        if (Status != NegotiationStatus.Cancelled || CancelReason != expectedReason)
+        {
+            return false;
+        }
+
+        Status = NegotiationStatus.Agreed;
+        CancelReason = string.Empty;
+        Touch(now);
+        return true;
+    }
+
     /// <summary>The swap of an agreed negotiation was cancelled (e.g. payment timeout). Returns false unless Agreed.</summary>
     public bool CancelAgreed(string reason, DateTimeOffset now)
     {

@@ -1,0 +1,19 @@
+# Prometheus for the local MVP (compose profile "observability"). The services run on the host, so the targets are the
+# health listeners (HTTP /metrics) reached through host.docker.internal. dev.sh binds them to 127.0.0.1 by default;
+# see docs/guidelines/running-locally.md if the targets show DOWN.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: taakht
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:9101"]
+        labels: { service: ad }
+      - targets: ["host.docker.internal:9102"]
+        labels: { service: matching }
+      - targets: ["host.docker.internal:9103"]
+        labels: { service: negotiation }
+      - targets: ["host.docker.internal:9104"]
+        labels: { service: swap }

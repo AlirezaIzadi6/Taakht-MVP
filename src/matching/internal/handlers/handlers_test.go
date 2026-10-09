@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -291,5 +292,128 @@ func TestLegacyEventsWithoutSeqKeepWorking(t *testing.T) {
 	e.deliver(t, "taakht.ad.v1.AdHidden", &adv1.AdHidden{AdId: id})
 	if e.indexed(t, id) == nil {
 		t.Fatal("legacy removal must not override sequenced state")
+	}
+}
+
+func (e *env) matchCount(ad, matched string) int {
+	n := 0
+	for _, m := range e.sent {
+		if m.AdId == ad && m.MatchedAdId == matched {
+			n++
+		}
+	}
+	return n
+}
+
+func TestEditAndReReleaseRenotifyOncePerSeq(t *testing.T) {
+	e := setup(t)
+	a, b := uuid.NewString(), uuid.NewString()
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(a, "user-1", 1, published, "books", "tools"), Seq: 1})
+	pubB := &adv1.AdPublished{Ad: ad(b, "user-2", 1, published, "tools", "books"), Seq: 1}
+	e.deliver(t, typPub, pubB)
+	if e.matchCount(b, a) != 1 {
+		t.Fatalf("initial match missing: %v", e.sent)
+	}
+
+	// Redelivery of the same event (same seq) never re-notifies.
+	e.deliver(t, typPub, pubB)
+	if e.matchCount(b, a) != 1 {
+		t.Fatalf("redelivery re-notified: %v", e.sent)
+	}
+
+	// An edit (higher version and seq) notifies again, once, however often it is redelivered.
+	edit := &adv1.AdEdited{Ad: ad(b, "user-2", 2, published, "tools", "books"), Seq: 2}
+	e.deliver(t, typEdit, edit)
+	e.deliver(t, typEdit, edit)
+	if e.matchCount(b, a) != 2 {
+		t.Fatalf("edit should re-notify exactly once: %v", e.sent)
+	}
+
+	// Out of order: the older publish arriving after the edit changes nothing.
+	e.deliver(t, typPub, pubB)
+	if e.matchCount(b, a) != 2 {
+		t.Fatalf("stale event re-notified: %v", e.sent)
+	}
+
+	// Lock and release at the same version: the re-add (higher seq) notifies again; its redelivery does not.
+	e.deliver(t, "taakht.ad.v1.AdLocked", &adv1.AdLocked{AdId: b, SwapId: "s", Seq: 3})
+	rel := &adv1.AdReleased{AdId: b, SwapId: "s", Ad: ad(b, "user-2", 2, published, "tools", "books"), Seq: 4}
+	e.deliver(t, "taakht.ad.v1.AdReleased", rel)
+	e.deliver(t, "taakht.ad.v1.AdReleased", rel)
+	if e.matchCount(b, a) != 3 {
+		t.Fatalf("re-release should re-notify exactly once: %v", e.sent)
+	}
+	// A late lock (seq 3) and a replayed release must neither remove the ad nor notify.
+	e.deliver(t, "taakht.ad.v1.AdLocked", &adv1.AdLocked{AdId: b, SwapId: "s", Seq: 3})
+	e.deliver(t, "taakht.ad.v1.AdReleased", rel)
+	if e.matchCount(b, a) != 3 || e.indexed(t, b) == nil {
+		t.Fatalf("late event had an effect: %v", e.sent)
+	}
+
+	// Legacy events without a seq keep once-per-pair.
+	l1, l2 := uuid.NewString(), uuid.NewString()
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(l1, "user-3", 1, published, "games", "music")})
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(l2, "user-4", 1, published, "music", "games")})
+	e.deliver(t, typEdit, &adv1.AdEdited{Ad: ad(l2, "user-4", 2, published, "music", "games")})
+	if e.matchCount(l2, l1) != 1 {
+		t.Fatalf("legacy edit re-notified: %v", e.sent)
+	}
+}
+
+func TestEditOnlyClearsThatAdsPairs(t *testing.T) {
+	e := setup(t)
+	a, b, c := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(a, "user-1", 1, published, "books", "tools"), Seq: 1})
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(b, "user-2", 1, published, "tools", "books"), Seq: 1})
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(c, "user-3", 1, published, "tools", "books"), Seq: 1})
+	before := len(e.sent)
+	e.deliver(t, typEdit, &adv1.AdEdited{Ad: ad(a, "user-1", 2, published, "books", "tools"), Seq: 2})
+	// a is notified about b and c again; b and c are not re-notified about a.
+	if e.matchCount(a, b) != 1 || e.matchCount(a, c) != 1 || len(e.sent) != before+2 || e.matchCount(b, a) != 1 || e.matchCount(c, a) != 1 {
+		t.Fatalf("unexpected notifications: %v", e.sent)
+	}
+}
+
+// Two compatible ads on different partitions can be applied at the same time by parallel consumers (or by two
+// instances). Each transaction must see the other's committed row, otherwise neither notifies.
+func TestConcurrentApplyOfCompatibleAdsStillNotifies(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	a, b := uuid.NewString(), uuid.NewString()
+
+	tx1, err := e.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.h.ApplySnapshot(ctx, tx1, ad(a, "user-1", 1, published, "books", "tools"), 1); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		tx2, err := e.pool.Begin(ctx)
+		if err != nil {
+			done <- err
+			return
+		}
+		if err := e.h.ApplySnapshot(ctx, tx2, ad(b, "user-2", 1, published, "tools", "books"), 1); err != nil {
+			_ = tx2.Rollback(ctx)
+			done <- err
+			return
+		}
+		done <- tx2.Commit(ctx)
+	}()
+
+	// Let the second transaction run up to the point where it would query candidates, then commit the first.
+	time.Sleep(300 * time.Millisecond)
+	if err := tx1.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	if got := e.matchCount(a, b) + e.matchCount(b, a); got != 1 {
+		t.Fatalf("expected exactly one MatchFound for the pair, got %d (%v)", got, e.sent)
 	}
 }

@@ -39,7 +39,9 @@ public sealed class EventHandlers(TimeProvider clock, ILogger<EventHandlers> log
     /// <summary>
     /// The swap holds the lock on the winner's ads. The winner named by the event must exist, concern exactly those ads
     /// and still be AGREEMENT_PENDING (or already AGREED); otherwise the event is stale (an old swap, a negotiation that was
-    /// cancelled since) and is ignored, in particular it must not cancel anybody else's negotiation.
+    /// cancelled since) and is ignored, in particular it must not cancel anybody else's negotiation. The one exception is a
+    /// negotiation the sweeper cancelled for timing out ('agreement timed out'): the late lock proves the swap holds the ads,
+    /// so it is reopened as AGREED (nothing new is emitted) and its live competitors are cancelled as usual.
     /// </summary>
     internal async Task OnExclusiveLockAsync(NpgsqlConnection conn, NpgsqlTransaction tx, ExclusiveLockAcquired e)
     {
@@ -65,26 +67,22 @@ public sealed class EventHandlers(TimeProvider clock, ILogger<EventHandlers> log
             return;
         }
 
-        if (winner.Status is not (NegotiationStatus.AgreementPending or NegotiationStatus.Agreed))
+        if (winner.ReopenCancelledAsAgreed(NegotiationService.AgreementTimedOutReason, now))
         {
-            if (winner.Status == NegotiationStatus.Cancelled && winner.CancelReason == NegotiationService.AgreementTimedOutReason)
-            {
-                // Residual risk (see the architecture doc): the sweeper gave up on a swap that was only slow.
-                logger.LogError(
-                    "Swap {SwapId} holds the ads of negotiation {NegotiationId}, which the sweeper already cancelled ('{Reason}'); needs a manual look",
-                    e.SwapId, id, winner.CancelReason);
-            }
-            else
-            {
-                logger.LogWarning(
-                    "ExclusiveLockAcquired {SwapId} for negotiation {NegotiationId} which is {Status}; ignored as stale",
-                    e.SwapId, id, winner.Status);
-            }
-
+            // The sweeper gave up on a swap that was only slow: the swap holds the ads and is authoritative.
+            logger.LogWarning(
+                "Swap {SwapId} took the lock after negotiation {NegotiationId} was cancelled ('{Reason}'); the negotiation is AGREED again",
+                e.SwapId, id, NegotiationService.AgreementTimedOutReason);
+            await NegotiationRepository.SaveAsync(conn, tx, winner, CancellationToken.None);
+        }
+        else if (winner.Status is not (NegotiationStatus.AgreementPending or NegotiationStatus.Agreed))
+        {
+            logger.LogWarning(
+                "ExclusiveLockAcquired {SwapId} for negotiation {NegotiationId} which is {Status}; ignored as stale",
+                e.SwapId, id, winner.Status);
             return;
         }
-
-        if (winner.MarkAgreed(now))
+        else if (winner.MarkAgreed(now))
         {
             await NegotiationRepository.SaveAsync(conn, tx, winner, CancellationToken.None);
         }

@@ -17,7 +17,8 @@ Environment (defaults shown):
 | `DATABASE_URL` | `postgres://taakht:taakht@127.0.0.1:5432/ad?sslmode=disable` |
 | `KAFKA_BROKERS` | `127.0.0.1:9094` |
 | `GRPC_ADDR` | `:9001` |
-| `ELIGIBILITY_FILE` | `../../config/eligibility.json` |
+| `ELIGIBILITY_FILE` | `../../config/eligibility.json` (re-read within 30 s of a change; an invalid file is ignored and logged) |
+| `AD_LOCK_RETENTION` | `30d` (finished `ad_lock` rows are pruned after this; `ad_version` is never pruned) |
 | `DB_MAX_CONNS` / `DB_MIN_CONNS` / `REQUEST_TIMEOUT` | `20` / `2` / `15s` |
 
 Shared settings (pool bounds `DB_MAX_CONNS` 20 / `DB_MIN_CONNS`, retention and prune settings, `INTERNAL_AUTH_TOKEN`) are described in [MVP service conventions](../../docs/guidelines/mvp-service-conventions.md). Use `127.0.0.1`, not `localhost`, for host-run services.

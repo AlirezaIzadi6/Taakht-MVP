@@ -218,3 +218,52 @@ func newThrowawayDB(ctx context.Context, t *testing.T, base string) *pgxpool.Poo
 	})
 	return pool
 }
+
+func TestEnvDuration(t *testing.T) {
+	const name = "HK_TEST_RETENTION"
+	t.Setenv(name, "")
+	if d, err := housekeeping.EnvDuration(name, 7*24*time.Hour); err != nil || d != 7*24*time.Hour {
+		t.Fatalf("default = %v, %v", d, err)
+	}
+	t.Setenv(name, "2d")
+	if d, err := housekeeping.EnvDuration(name, time.Hour); err != nil || d != 48*time.Hour {
+		t.Fatalf("2d = %v, %v", d, err)
+	}
+	for _, bad := range []string{"30s", "nope", "-1h"} {
+		t.Setenv(name, bad)
+		if _, err := housekeeping.EnvDuration(name, time.Hour); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+func TestExtraPrune(t *testing.T) {
+	base := os.Getenv("TEST_DATABASE_URL")
+	if base == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pool := newThrowawayDB(ctx, t, base)
+	if _, err := pool.Exec(ctx, ddl+`
+CREATE TABLE extra (id serial PRIMARY KEY, at timestamptz NOT NULL);
+INSERT INTO extra (at) SELECT now() - interval '3 days' FROM generate_series(1, 25);
+INSERT INTO extra (at) SELECT now() FROM generate_series(1, 4);`); err != nil {
+		t.Fatal(err)
+	}
+	opts := housekeeping.Options{BatchSize: 10, Extra: []housekeeping.Prune{{
+		Name: "EXTRA", Retention: 24 * time.Hour,
+		SQL: `DELETE FROM extra WHERE id IN (SELECT id FROM extra WHERE at < now() - ($1 * interval '1 second') LIMIT $2)`,
+	}}}
+	if err := opts.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := housekeeping.PruneOnce(ctx, pool, opts); err != nil {
+		t.Fatal(err)
+	}
+	assertCount(ctx, t, pool, `SELECT count(*) FROM extra`, 4)
+	opts.Extra[0].Retention = time.Second
+	if err := opts.Validate(); err == nil {
+		t.Error("retention below minimum accepted")
+	}
+}

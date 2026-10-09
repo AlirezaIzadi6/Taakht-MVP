@@ -1,0 +1,207 @@
+{
+ "script": "negotiate",
+ "date": "2026-10-09T05:48:17.919Z",
+ "params": {
+  "VUS": 160,
+  "DURATION": "60s",
+  "POLL_MS": 100,
+  "THINK": 0.2
+ },
+ "metrics": {
+  "api_calls": {
+   "count": 46138,
+   "rate": 568.9232965201809
+  },
+  "http_req_failed": {
+   "rate": 0,
+   "passes": 0,
+   "fails": 46138
+  },
+  "vus_max": {
+   "value": 160,
+   "min": 160,
+   "max": 160
+  },
+  "iteration_duration": {
+   "avg": 15690.27907109592,
+   "min": 962.632,
+   "med": 15527.023850000001,
+   "max": 32006.5361,
+   "p(90)": 28883.68956,
+   "p(95)": 30530.419934999994,
+   "p(99)": 31739.715713
+  },
+  "http_req_connecting": {
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0,
+   "avg": 0.002954985044865404,
+   "min": 0,
+   "med": 0,
+   "max": 2.2645
+  },
+  "http_reqs": {
+   "count": 46138,
+   "rate": 568.9232965201809
+  },
+  "time_to_ads_closed": {
+   "p(90)": 26642.6,
+   "p(95)": 27990.15,
+   "p(99)": 29648.09,
+   "avg": 14099.872549019608,
+   "min": 478,
+   "med": 13568.5,
+   "max": 29980
+  },
+  "iteration_ok": {
+   "rate": 0.9780821917808219,
+   "passes": 714,
+   "fails": 16
+  },
+  "vus": {
+   "value": 0,
+   "min": 0,
+   "max": 160
+  },
+  "unexpected_status": {
+   "rate": 0,
+   "passes": 0,
+   "fails": 46138
+  },
+  "data_received": {
+   "count": 81295515,
+   "rate": 1002447.2752634663
+  },
+  "time_to_agreed": {
+   "p(90)": 26656,
+   "p(95)": 28000.5,
+   "p(99)": 29756.9,
+   "avg": 14129.42877094972,
+   "min": 471,
+   "med": 13592,
+   "max": 30087
+  },
+  "http_req_duration{name:open negotiation}": {
+   "min": 58.1843,
+   "med": 195.6958,
+   "max": 507.7042,
+   "p(90)": 269.74715,
+   "p(95)": 292.9757099999999,
+   "p(99)": 338.64102300000013,
+   "avg": 195.9052110958906
+  },
+  "data_sent": {
+   "count": 18736258,
+   "rate": 231035.0181154929
+  },
+  "iterations": {
+   "count": 730,
+   "rate": 9.001560675792883
+  },
+  "checks": {
+   "rate": 0.9962640099626401,
+   "passes": 8000,
+   "fails": 30
+  },
+  "http_req_receiving": {
+   "med": 0,
+   "max": 4.9168,
+   "p(90)": 0.5345,
+   "p(95)": 0.5465,
+   "p(99)": 0.6644149999999986,
+   "avg": 0.08021322120594758,
+   "min": 0
+  },
+  "http_req_blocked": {
+   "med": 0,
+   "max": 30.0427,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0,
+   "avg": 0.007243413238545237,
+   "min": 0
+  },
+  "http_req_tls_handshaking": {
+   "min": 0,
+   "med": 0,
+   "max": 0,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0,
+   "avg": 0
+  },
+  "http_req_duration": {
+   "avg": 160.33215415275825,
+   "min": 4.8923,
+   "med": 170.40615,
+   "max": 966.0633,
+   "p(90)": 236.84619000000004,
+   "p(95)": 264.49562,
+   "p(99)": 572.7188069999999
+  },
+  "http_req_waiting": {
+   "p(95)": 264.43845500000003,
+   "p(99)": 572.2023879999998,
+   "avg": 160.2395706142429,
+   "min": 4.3551,
+   "med": 170.34820000000002,
+   "max": 966.0633,
+   "p(90)": 236.69428000000002
+  },
+  "http_req_sending": {
+   "avg": 0.012370317308942726,
+   "min": 0,
+   "med": 0,
+   "max": 3.9857,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0.5407629999999997
+  }
+ },
+ "thresholds": {
+  "http_req_failed rate<0.01": "pass",
+  "time_to_ads_closed p(95)<5000": "FAIL",
+  "iteration_ok rate>0.99": "FAIL",
+  "unexpected_status rate<0.01": "pass",
+  "time_to_agreed p(95)<2000": "FAIL",
+  "http_req_duration{name:open negotiation} p(95)<1000": "pass"
+ },
+ "root_group_checks": {
+  "create ad 200": {
+   "passes": 1460,
+   "fails": 0
+  },
+  "publish ad 200": {
+   "passes": 1460,
+   "fails": 0
+  },
+  "open negotiation 200": {
+   "passes": 730,
+   "fails": 0
+  },
+  "approve ad 200": {
+   "passes": 730,
+   "fails": 0
+  },
+  "approve proposal (1st) 200": {
+   "passes": 730,
+   "fails": 0
+  },
+  "approve proposal (final) 200": {
+   "passes": 730,
+   "fails": 0
+  },
+  "final approval -> AGREEMENT_PENDING or AGREED": {
+   "passes": 730,
+   "fails": 0
+  },
+  "negotiation reached AGREED": {
+   "passes": 716,
+   "fails": 14
+  },
+  "target ad reached CLOSED": {
+   "passes": 714,
+   "fails": 16
+  }
+ }
+}

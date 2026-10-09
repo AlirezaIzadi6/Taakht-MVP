@@ -245,6 +245,9 @@ public sealed class HousekeepingService(
             """,
             options.DeadLetterRetention,
             ct);
+        PlatformMetrics.HousekeepingDeleted.WithLabels("outbox").Inc(outbox);
+        PlatformMetrics.HousekeepingDeleted.WithLabels("processed_events").Inc(processed);
+        PlatformMetrics.HousekeepingDeleted.WithLabels("dead_letter").Inc(deadLetter);
         if ((outbox > 0 || processed > 0 || deadLetter > 0) && logger.IsEnabled(LogLevel.Information))
         {
             logger.LogInformation(

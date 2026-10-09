@@ -26,12 +26,15 @@ const (
 // `type` is the fully qualified proto message name of the payload
 // (for example "taakht.ad.v1.AdPublished"); `payload` is that message, serialized.
 type Envelope struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
-	AggregateId   string                 `protobuf:"bytes,3,opt,name=aggregate_id,json=aggregateId,proto3" json:"aggregate_id,omitempty"`
-	OccurredAt    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
-	Payload       []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	EventId     string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	Type        string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	AggregateId string                 `protobuf:"bytes,3,opt,name=aggregate_id,json=aggregateId,proto3" json:"aggregate_id,omitempty"`
+	OccurredAt  *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
+	Payload     []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
+	// Request id (header x-request-id) of the call that caused this event; empty when there was no caller
+	// (sweepers, housekeeping). Consumers restore it into their log context so one id spans sync and async hops.
+	RequestId     string `protobuf:"bytes,6,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -101,18 +104,27 @@ func (x *Envelope) GetPayload() []byte {
 	return nil
 }
 
+func (x *Envelope) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 var File_taakht_common_v1_envelope_proto protoreflect.FileDescriptor
 
 const file_taakht_common_v1_envelope_proto_rawDesc = "" +
 	"\n" +
-	"\x1ftaakht/common/v1/envelope.proto\x12\x10taakht.common.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb3\x01\n" +
+	"\x1ftaakht/common/v1/envelope.proto\x12\x10taakht.common.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd2\x01\n" +
 	"\bEnvelope\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12!\n" +
 	"\faggregate_id\x18\x03 \x01(\tR\vaggregateId\x12;\n" +
 	"\voccurred_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"occurredAt\x12\x18\n" +
-	"\apayload\x18\x05 \x01(\fR\apayloadBKZ6github.com/taakht/taakht/gen/taakht/common/v1;commonv1\xaa\x02\x10Taakht.Common.V1b\x06proto3"
+	"\apayload\x18\x05 \x01(\fR\apayload\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x06 \x01(\tR\trequestIdBKZ6github.com/taakht/taakht/gen/taakht/common/v1;commonv1\xaa\x02\x10Taakht.Common.V1b\x06proto3"
 
 var (
 	file_taakht_common_v1_envelope_proto_rawDescOnce sync.Once

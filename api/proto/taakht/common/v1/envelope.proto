@@ -16,4 +16,7 @@ message Envelope {
   string aggregate_id = 3;
   google.protobuf.Timestamp occurred_at = 4;
   bytes payload = 5;
+  // Request id (header x-request-id) of the call that caused this event; empty when there was no caller
+  // (sweepers, housekeeping). Consumers restore it into their log context so one id spans sync and async hops.
+  string request_id = 6;
 }

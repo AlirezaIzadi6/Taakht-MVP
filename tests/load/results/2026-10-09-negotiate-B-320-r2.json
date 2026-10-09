@@ -1,0 +1,207 @@
+{
+ "script": "negotiate",
+ "date": "2026-10-09T05:41:23.414Z",
+ "params": {
+  "VUS": 320,
+  "DURATION": "60s",
+  "POLL_MS": 100,
+  "THINK": 0.2
+ },
+ "metrics": {
+  "http_req_sending": {
+   "med": 0,
+   "max": 5.3388,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0.543,
+   "avg": 0.012736463489718011,
+   "min": 0
+  },
+  "http_req_receiving": {
+   "avg": 0.07850910479005019,
+   "min": 0,
+   "med": 0,
+   "max": 4.9908,
+   "p(90)": 0.5331,
+   "p(95)": 0.5466,
+   "p(99)": 0.6761100000000035
+  },
+  "unexpected_status": {
+   "rate": 0,
+   "passes": 0,
+   "fails": 81210
+  },
+  "http_req_connecting": {
+   "min": 0,
+   "med": 0,
+   "max": 6.719,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0,
+   "avg": 0.0034416438862209095
+  },
+  "iteration_duration": {
+   "avg": 18291.953446113625,
+   "min": 902.69,
+   "med": 20982.563000000002,
+   "max": 32650.2112,
+   "p(90)": 28853.73762,
+   "p(95)": 29845.351609999998,
+   "p(99)": 32200.749748999995
+  },
+  "iteration_ok": {
+   "passes": 1300,
+   "fails": 38,
+   "rate": 0.9715994020926756
+  },
+  "http_req_blocked": {
+   "p(95)": 0,
+   "p(99)": 0,
+   "avg": 0.00733153306243074,
+   "min": 0,
+   "med": 0,
+   "max": 18.1669,
+   "p(90)": 0
+  },
+  "time_to_agreed": {
+   "med": 19173.5,
+   "max": 30212,
+   "p(90)": 26458.3,
+   "p(95)": 27435.05,
+   "p(99)": 28458,
+   "avg": 16335.86712749616,
+   "min": 325
+  },
+  "http_req_duration": {
+   "med": 196.48585,
+   "max": 4719.4866,
+   "p(90)": 270.20524,
+   "p(95)": 402.56419500000044,
+   "p(99)": 717.2199480000003,
+   "avg": 213.9177243233568,
+   "min": 3.4912
+  },
+  "vus": {
+   "max": 320,
+   "value": 0,
+   "min": 0
+  },
+  "time_to_ads_closed": {
+   "min": 331,
+   "med": 19178,
+   "max": 29804,
+   "p(90)": 26464.3,
+   "p(95)": 27384.299999999996,
+   "p(99)": 28320.52,
+   "avg": 16330.387692307693
+  },
+  "http_req_failed": {
+   "rate": 0,
+   "passes": 0,
+   "fails": 81210
+  },
+  "api_calls": {
+   "count": 81210,
+   "rate": 932.2804799012096
+  },
+  "iterations": {
+   "count": 1338,
+   "rate": 15.360069968080513
+  },
+  "http_req_duration{name:open negotiation}": {
+   "p(90)": 317.48694,
+   "p(95)": 339.5174699999997,
+   "p(99)": 508.56252499999687,
+   "avg": 239.33039723467846,
+   "min": 20.5102,
+   "med": 241.9749,
+   "max": 3708.2655
+  },
+  "data_received": {
+   "rate": 1629100.6843655067,
+   "count": 141909296
+  },
+  "http_reqs": {
+   "count": 81210,
+   "rate": 932.2804799012096
+  },
+  "http_req_tls_handshaking": {
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0,
+   "avg": 0,
+   "min": 0,
+   "med": 0,
+   "max": 0
+  },
+  "checks": {
+   "passes": 14644,
+   "fails": 74,
+   "rate": 0.9949721429542058
+  },
+  "data_sent": {
+   "count": 33012740,
+   "rate": 378982.05996864743
+  },
+  "http_req_waiting": {
+   "max": 4718.464,
+   "p(90)": 270.11924999999997,
+   "p(95)": 402.56419500000044,
+   "p(99)": 717.2115600000006,
+   "avg": 213.8264787550776,
+   "min": 3.4912,
+   "med": 196.3978
+  },
+  "vus_max": {
+   "value": 320,
+   "min": 320,
+   "max": 320
+  }
+ },
+ "thresholds": {
+  "unexpected_status rate<0.01": "pass",
+  "iteration_ok rate>0.99": "FAIL",
+  "time_to_agreed p(95)<2000": "FAIL",
+  "time_to_ads_closed p(95)<5000": "FAIL",
+  "http_req_failed rate<0.01": "pass",
+  "http_req_duration{name:open negotiation} p(95)<1000": "pass"
+ },
+ "root_group_checks": {
+  "create ad 200": {
+   "passes": 2676,
+   "fails": 0
+  },
+  "publish ad 200": {
+   "passes": 2676,
+   "fails": 0
+  },
+  "open negotiation 200": {
+   "passes": 1338,
+   "fails": 0
+  },
+  "approve ad 200": {
+   "passes": 1338,
+   "fails": 0
+  },
+  "approve proposal (1st) 200": {
+   "passes": 1338,
+   "fails": 0
+  },
+  "approve proposal (final) 200": {
+   "passes": 1338,
+   "fails": 0
+  },
+  "final approval -> AGREEMENT_PENDING or AGREED": {
+   "passes": 1338,
+   "fails": 0
+  },
+  "negotiation reached AGREED": {
+   "passes": 1302,
+   "fails": 36
+  },
+  "target ad reached CLOSED": {
+   "passes": 1300,
+   "fails": 38
+  }
+ }
+}

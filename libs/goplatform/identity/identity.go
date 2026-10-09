@@ -27,31 +27,75 @@ const (
 	SystemNegotiation = "system:negotiation"
 )
 
-// TokenHeader is the metadata key carrying the shared internal secret on service-to-service calls.
+// TokenHeader is the metadata key carrying the internal secret on service-to-service calls.
 const TokenHeader = "x-internal-token"
 
 // DefaultInternalToken is the local-dev value of INTERNAL_AUTH_TOKEN. DEV ONLY: it is public in the repo.
 const DefaultInternalToken = "dev-internal-token"
 
-var (
-	tokenOnce sync.Once
-	token     string
-)
-
-// InternalToken returns the shared internal secret (env INTERNAL_AUTH_TOKEN, else the dev default).
-func InternalToken() string {
-	tokenOnce.Do(func() {
-		if token = os.Getenv("INTERNAL_AUTH_TOKEN"); token == "" {
-			token = DefaultInternalToken
-		}
-	})
-	return token
+// Environment variables (all optional except that the dev default applies when INTERNAL_AUTH_TOKEN is unset):
+//
+//	INTERNAL_AUTH_TOKEN           current shared secret; clients always send this one
+//	INTERNAL_AUTH_TOKEN_PREVIOUS  old shared secret, still accepted from callers during a rotation window
+//	INTERNAL_AUTH_TOKEN_SWAP      when set, system:swap must present THIS token (not the shared one)
+//	INTERNAL_AUTH_TOKEN_NEGOTIATION  same for system:negotiation
+//
+// A per-identity token, when set, replaces the shared token for that identity only (on both the
+// verifying and the sending side), so a leak of one service's token cannot claim the other identity.
+type tokenSet struct {
+	current, previous string
+	perID             map[string]string
 }
 
-// WarnIfDefaultToken logs a warning when the dev-only default internal token is in use.
+var (
+	tokenOnce sync.Once
+	tokens    tokenSet
+)
+
+func loadTokens(getenv func(string) string) tokenSet {
+	ts := tokenSet{current: getenv("INTERNAL_AUTH_TOKEN"), previous: getenv("INTERNAL_AUTH_TOKEN_PREVIOUS"), perID: map[string]string{}}
+	if ts.current == "" {
+		ts.current = DefaultInternalToken
+	}
+	if v := getenv("INTERNAL_AUTH_TOKEN_SWAP"); v != "" {
+		ts.perID[SystemSwap] = v
+	}
+	if v := getenv("INTERNAL_AUTH_TOKEN_NEGOTIATION"); v != "" {
+		ts.perID[SystemNegotiation] = v
+	}
+	return ts
+}
+
+func current() tokenSet {
+	tokenOnce.Do(func() { tokens = loadTokens(os.Getenv) })
+	return tokens
+}
+
+// InternalToken returns the current shared internal secret (env INTERNAL_AUTH_TOKEN, else the dev default).
+func InternalToken() string { return current().current }
+
+// TokenFor returns the token a client must send when calling as id: the identity's own token when
+// configured, else the current shared secret.
+func TokenFor(id string) string {
+	ts := current()
+	if v, ok := ts.perID[id]; ok {
+		return v
+	}
+	return ts.current
+}
+
+// WarnIfDefaultToken logs a warning when the dev-only default internal token is in use, and an info
+// line while a rotation window (INTERNAL_AUTH_TOKEN_PREVIOUS) or per-identity tokens are active.
 func WarnIfDefaultToken() {
-	if InternalToken() == DefaultInternalToken {
+	ts := current()
+	if ts.current == DefaultInternalToken {
 		slog.Warn("INTERNAL_AUTH_TOKEN is not set: using the public dev-only default; set it in any shared environment")
+	}
+	if ts.previous != "" {
+		slog.Info("internal token rotation window is active: INTERNAL_AUTH_TOKEN_PREVIOUS is also accepted; unset it once every service sends the new token")
+	}
+	if len(ts.perID) > 0 {
+		slog.Info("per-identity internal tokens are active", "identities", len(ts.perID))
 	}
 }
 
@@ -63,19 +107,33 @@ func hasPrefix(id string) bool {
 // known reports whether id is one of the allowlisted service identities (exact, case-sensitive).
 func known(id string) bool { return id == SystemSwap || id == SystemNegotiation }
 
-// validToken compares got with the internal secret in constant time (over fixed-length digests).
-func validToken(got string) bool {
+func digestEqual(got, want string) int {
+	a, b := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(a[:], b[:])
+}
+
+// validToken reports whether got proves identity id: it must equal the identity's own token when one is
+// configured, else the current or the previous shared secret. Constant time (over fixed-length digests,
+// without short-circuiting between the candidates).
+func validToken(id, got string) bool {
 	if got == "" {
 		return false
 	}
-	a, b := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(InternalToken()))
-	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
+	ts := current()
+	if v, ok := ts.perID[id]; ok {
+		return digestEqual(got, v) == 1
+	}
+	ok := digestEqual(got, ts.current)
+	if ts.previous != "" {
+		ok |= digestEqual(got, ts.previous)
+	}
+	return ok == 1
 }
 
 // IsSystem reports whether the caller is a service: its id is exactly system:swap or system:negotiation AND
 // the incoming x-internal-token matches the shared secret. The id alone proves nothing.
 func IsSystem(ctx context.Context) bool {
-	return known(UserID(ctx)) && validToken(tokenFromMetadata(ctx))
+	return known(UserID(ctx)) && validToken(UserID(ctx), tokenFromMetadata(ctx))
 }
 
 // IsSystemID reports whether id merely has the reserved prefix (no proof; use IsSystem for decisions).
@@ -117,7 +175,7 @@ func ServerInterceptor() grpc.UnaryServerInterceptor {
 		if !Valid(id) {
 			return nil, status.Error(codes.Unauthenticated, "invalid x-user-id")
 		}
-		if hasPrefix(id) && (!known(id) || !validToken(tokenFromMetadata(ctx))) {
+		if hasPrefix(id) && (!known(id) || !validToken(id, tokenFromMetadata(ctx))) {
 			return nil, status.Error(codes.Unauthenticated, "system identity requires a valid x-internal-token")
 		}
 		return h(context.WithValue(ctx, ctxKey{}, id), req)
@@ -130,7 +188,7 @@ func ClientInterceptor() grpc.UnaryClientInterceptor {
 		if id := UserID(ctx); id != "" {
 			ctx = metadata.AppendToOutgoingContext(ctx, Header, id)
 			if hasPrefix(id) {
-				ctx = metadata.AppendToOutgoingContext(ctx, TokenHeader, InternalToken())
+				ctx = metadata.AppendToOutgoingContext(ctx, TokenHeader, TokenFor(id))
 			}
 		}
 		return invoker(ctx, method, req, reply, cc, opts...)

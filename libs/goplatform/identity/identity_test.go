@@ -153,3 +153,71 @@ func TestIsSystemAllowlist(t *testing.T) {
 		t.Fatal("IsSystem must allowlist exactly the two service ids")
 	}
 }
+
+// useTokens swaps the token configuration for the duration of a test.
+func useTokens(t *testing.T, env map[string]string) {
+	t.Helper()
+	current() // make sure the Once has fired so it cannot overwrite the override
+	saved := tokens
+	tokens = loadTokens(func(k string) string { return env[k] })
+	t.Cleanup(func() { tokens = saved })
+}
+
+func TestRotationAcceptsCurrentAndPrevious(t *testing.T) {
+	useTokens(t, map[string]string{"INTERNAL_AUTH_TOKEN": "new-token", "INTERNAL_AUTH_TOKEN_PREVIOUS": "old-token"})
+	for tok, want := range map[string]bool{"new-token": true, "old-token": true, "older": false, "": false, "new-toke": false} {
+		if got := IsSystem(incoming(SystemSwap, tok)); got != want {
+			t.Errorf("token %q: IsSystem=%v want %v", tok, got, want)
+		}
+	}
+	// Clients always send the current token, never the previous one.
+	if TokenFor(SystemSwap) != "new-token" || InternalToken() != "new-token" {
+		t.Fatalf("client must send the current token, got %q", TokenFor(SystemSwap))
+	}
+	// After the window closes the old token stops working.
+	useTokens(t, map[string]string{"INTERNAL_AUTH_TOKEN": "new-token"})
+	if IsSystem(incoming(SystemSwap, "old-token")) {
+		t.Fatal("previous token accepted without INTERNAL_AUTH_TOKEN_PREVIOUS")
+	}
+}
+
+func TestPerIdentityTokenScoping(t *testing.T) {
+	useTokens(t, map[string]string{
+		"INTERNAL_AUTH_TOKEN": "shared", "INTERNAL_AUTH_TOKEN_PREVIOUS": "shared-old",
+		"INTERNAL_AUTH_TOKEN_SWAP": "swap-tok", "INTERNAL_AUTH_TOKEN_NEGOTIATION": "neg-tok",
+	})
+	cases := []struct {
+		id, tok string
+		ok      bool
+	}{
+		{SystemSwap, "swap-tok", true},
+		{SystemSwap, "neg-tok", false}, // a compromised negotiation token cannot claim system:swap
+		{SystemSwap, "shared", false},  // the shared token no longer proves a scoped identity
+		{SystemSwap, "shared-old", false},
+		{SystemNegotiation, "neg-tok", true},
+		{SystemNegotiation, "swap-tok", false},
+	}
+	for _, c := range cases {
+		if got := IsSystem(incoming(c.id, c.tok)); got != c.ok {
+			t.Errorf("%s with %q: got %v want %v", c.id, c.tok, got, c.ok)
+		}
+		_, err := ServerInterceptor()(incoming(c.id, c.tok), nil, &grpc.UnaryServerInfo{}, func(context.Context, any) (any, error) { return nil, nil })
+		if (err == nil) != c.ok {
+			t.Errorf("interceptor %s with %q: err=%v", c.id, c.tok, err)
+		}
+	}
+	if TokenFor(SystemSwap) != "swap-tok" || TokenFor(SystemNegotiation) != "neg-tok" {
+		t.Fatal("client must send the identity's own token")
+	}
+}
+
+func TestPerIdentityFallsBackToSharedToken(t *testing.T) {
+	useTokens(t, map[string]string{"INTERNAL_AUTH_TOKEN": "shared", "INTERNAL_AUTH_TOKEN_SWAP": "swap-tok"})
+	// Only swap is scoped: negotiation still uses the shared token.
+	if !IsSystem(incoming(SystemNegotiation, "shared")) || IsSystem(incoming(SystemNegotiation, "swap-tok")) {
+		t.Fatal("unscoped identity must keep using the shared token")
+	}
+	if TokenFor(SystemNegotiation) != "shared" {
+		t.Fatalf("got %q", TokenFor(SystemNegotiation))
+	}
+}

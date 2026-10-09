@@ -10,6 +10,10 @@ using Taakht.Platform;
 var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
 
+// Operability: logging, request id, health (grpc.health.v1, /healthz, /readyz) and /metrics on HEALTH_ADDR (default 127.0.0.1:9103).
+builder.AddTaakhtObservability("negotiation", 9103);
+
+
 var grpcAddr = config["GRPC_ADDR"] ?? ":9003";
 var adAddr = config["AD_ADDR"] ?? "127.0.0.1:9001";
 var cap = int.Parse(config["NEGOTIATION_CAP"] ?? "10", CultureInfo.InvariantCulture);
@@ -69,6 +73,7 @@ var app = builder.Build();
 await app.Services.MigrateAsync(typeof(Program).Assembly);
 
 app.MapGrpcService<NegotiationGrpcService>();
+app.MapTaakhtObservability();
 if (app.Environment.IsDevelopment())
 {
     app.MapGrpcReflectionService();

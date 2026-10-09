@@ -80,8 +80,11 @@ public sealed class FakeAdClient : IAdClient
 
     public Task<LockOutcome> LockAdsAsync(Guid swapId, IReadOnlyList<AdVersionRef> ads, CancellationToken ct)
     {
-        Calls.Add(swapId);
-        return Task.FromResult(_script.Count > 0 ? _script.Dequeue()() : new LockOutcome.Locked());
+        lock (_script)
+        {
+            Calls.Add(swapId);
+            return Task.FromResult(_script.Count > 0 ? _script.Dequeue()() : new LockOutcome.Locked());
+        }
     }
 }
 
@@ -146,6 +149,25 @@ public class WorkflowDatabaseTests(TestDatabase db) : IClassFixture<TestDatabase
         Assert.NotNull(swap.PaymentDeadline);
         Assert.Single(ads.Calls);
         Assert.Equal(["taakht.swap.v1.ExclusiveLockAcquired"], await OutboxTypesAsync(swap.Id));
+    }
+
+    [DbFact]
+    public async Task Concurrent_duplicate_agreements_produce_one_swap_and_one_lock_event()
+    {
+        // The consumer runs this handler outside its dedupe transaction (at-least-once), so two instances may handle the
+        // same event at once during a rebalance.
+        var ads = new FakeAdClient();
+        var (workflow, store, _) = Build(ads);
+        var msg = Agreement("neg-concurrent");
+
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => workflow.HandleAgreementReachedAsync(msg, CancellationToken.None))));
+
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        Assert.Equal(1, await conn.QuerySingleAsync<int>("SELECT count(*) FROM swap WHERE negotiation_id = 'neg-concurrent'"));
+        var swap = await SwapOfAsync(store, "neg-concurrent");
+        Assert.Equal(SwapStatus.AwaitingPayment, swap.Status);
+        Assert.Equal(["taakht.swap.v1.ExclusiveLockAcquired"], await OutboxTypesAsync(swap.Id));
+        Assert.All(ads.Calls, id => Assert.Equal(swap.Id, id));
     }
 
     [DbFact]

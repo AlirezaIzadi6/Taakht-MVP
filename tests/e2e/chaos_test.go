@@ -519,3 +519,169 @@ func chaosRestartSwap(t *testing.T, env string) error {
 	chaos.StartService(t, "swap", env)
 	return nil
 }
+
+// negotiationRow returns "status|cancel_reason|republish_count" of the negotiation straight from its database.
+func (f *flow) negotiationRow() string {
+	f.t.Helper()
+	return chaos.Psql(f.t, "negotiation", fmt.Sprintf("SELECT status||'|'||cancel_reason||'|'||republish_count FROM negotiation WHERE id='%s'", f.negID()))
+}
+
+// withAgreementTimeout restarts negotiation with a short AGREEMENT_PENDING_TIMEOUT and restores the default at the end.
+func withAgreementTimeout(t *testing.T, timeout string) {
+	t.Helper()
+	chaos.RestartService(t, "negotiation", "AGREEMENT_PENDING_TIMEOUT="+timeout)
+	t.Cleanup(func() { chaos.RestartService(t, "negotiation") })
+}
+
+// (8) Matching is down while ads are published; after the restart its index catches up from Kafka, every pair is
+// notified exactly once and replayed ad events (same and fresh event id) change nothing.
+func TestChaosMatchingDownDuringPublish(t *testing.T) {
+	c := chaosSetup(t)
+	u1, u2 := harness.NewActor(t, c, harness.User1), harness.NewActor(t, c, harness.User2)
+
+	chaos.StopService(t, "matching")
+	adP := u1.PublishAd(harness.Spec("Chaos match atlas", "books", "tools"))
+	adQ := u2.PublishAd(harness.Spec("Chaos match chisel", "tools", "books"))
+	sleep(t, 5*time.Second, "ads are published while matching is down; their events wait in Kafka")
+
+	t0 := time.Now()
+	chaos.StartService(t, "matching")
+	harness.Poll(t, "matching to index both ads and find the pair after the restart", convergeTimeout, func() (bool, string) {
+		cands, err := u1.Matches(adP.GetId())
+		if err != nil {
+			return false, err.Error()
+		}
+		for _, cand := range cands {
+			if cand.GetAd().GetId() == adQ.GetId() {
+				return true, ""
+			}
+		}
+		return false, fmt.Sprintf("%d candidates, ad Q not among them", len(cands))
+	})
+	caught := time.Since(t0)
+
+	ids := fmt.Sprintf("'%s','%s'", adP.GetId(), adQ.GetId())
+	counts := func() (pairs, notified, events, processed int) {
+		pairs = chaos.PsqlInt(t, "matching", fmt.Sprintf("SELECT count(*) FROM notified_pair WHERE (ad_id='%s' AND matched_ad_id='%s') OR (ad_id='%s' AND matched_ad_id='%s')",
+			adP.GetId(), adQ.GetId(), adQ.GetId(), adP.GetId()))
+		notified = chaos.PsqlInt(t, "matching", fmt.Sprintf("SELECT count(*) FROM notified_pair WHERE ad_id IN (%s)", ids))
+		events = chaos.PsqlInt(t, "matching", fmt.Sprintf("SELECT count(*) FROM outbox WHERE key IN (%s)", ids))
+		processed = chaos.PsqlInt(t, "matching", "SELECT count(*) FROM processed_events")
+		return pairs, notified, events, processed
+	}
+	sleep(t, 3*time.Second, "let the consumer drain")
+	pairs, notified, events, processed := counts()
+	t.Logf("after catch-up: pair rows=%d notified_pair rows of P/Q=%d MatchFound outbox rows=%d processed_events=%d", pairs, notified, events, processed)
+	harness.Require(t, pairs == 1, "the P/Q pair is recorded %d times in notified_pair, want exactly 1", pairs)
+	harness.Require(t, events == notified, "MatchFound events (%d) differ from notified_pair rows (%d) for the new ads", events, notified)
+	live := chaos.PsqlInt(t, "matching", fmt.Sprintf("SELECT count(*) FROM ad_index WHERE ad_id IN (%s) AND NOT removed", ids))
+	harness.Require(t, live == 2, "%d of the 2 published ads are live in the index", live)
+
+	// Replay AdPublished of ad Q: once with the same event id (consumer dedupe), once with a fresh one (seq guard).
+	orig := chaos.FindEnvelope(t, "ad.events", 30*time.Second, func(e *commonv1.Envelope) bool {
+		var m adv1.AdPublished
+		return strings.HasSuffix(e.GetType(), ".AdPublished") && proto.Unmarshal(e.GetPayload(), &m) == nil && m.GetAd().GetId() == adQ.GetId()
+	})
+	harness.Require(t, orig != nil, "AdPublished of ad Q not found on ad.events")
+	chaos.Publish(t, "ad.events", adQ.GetId(), orig)
+	fresh := proto.Clone(orig).(*commonv1.Envelope)
+	fresh.EventId = chaos.NewUUID()
+	chaos.Publish(t, "ad.events", adQ.GetId(), fresh)
+	sleep(t, 10*time.Second, "replayed AdPublished events are consumed")
+	pairs2, notified2, events2, processed2 := counts()
+	t.Logf("after replay: pair rows=%d notified=%d events=%d processed_events=%d (was %d)", pairs2, notified2, events2, processed2, processed)
+	harness.Require(t, pairs2 == pairs && notified2 == notified && events2 == events, "replay changed MatchFound state: pairs %d->%d notified %d->%d events %d->%d", pairs, pairs2, notified, notified2, events, events2)
+	harness.Require(t, processed2 == processed+1, "processed_events grew by %d after replaying one duplicate and one fresh-id event, want 1", processed2-processed)
+	record(t, "PASS matching down while 2 ads were published; index caught up %s after the matching port opened; pair notified once (notified_pair=%d, MatchFound outbox rows=%d); replay with the same event_id and with a fresh one changed nothing", caught.Round(time.Second), notified, events)
+}
+
+// (9) swap is killed before it consumes AgreementReached; with AGREEMENT_PENDING_TIMEOUT=20s the sweeper publishes the
+// event again; when swap returns it creates exactly one swap and the flow completes.
+func TestChaosAgreementPendingRepublish(t *testing.T) {
+	c := chaosSetup(t)
+	withAgreementTimeout(t, "20s")
+	f := newFlow(t, c)
+
+	chaos.StopService(t, "swap")
+	f.approve()
+	harness.Poll(t, "the sweeper to republish AgreementReached (republish_count >= 1)", 3*time.Minute, func() (bool, string) {
+		row := f.negotiationRow()
+		parts := strings.Split(row, "|")
+		return len(parts) == 3 && parts[2] != "0", row
+	})
+	republishedAt := time.Since(f.approvedAt)
+	harness.Require(t, f.swapStatusDB() == "", "swap rows exist although swap is down: %v", f.swapRows())
+
+	t0 := time.Now()
+	chaos.StartService(t, "swap", defaultDeadline)
+	_, took := f.waitLocked(convergeTimeout)
+	row := f.negotiationRow()
+	f.assertConsistent()
+	reopened := len(chaos.LogLines(t, "negotiation", "is AGREED again", 5)) > 0
+	f.payAll(convergeTimeout)
+	f.assertConsistent()
+	record(t, "PASS timeout 20s, swap killed before consuming; first republish %s after the 4th approval; swap back, converged %s after its port opened (%s after start); negotiation row at lock time %q; exactly one swap; negotiation had been cancelled and reopened by the late lock: %v",
+		republishedAt.Round(time.Second), took.Round(time.Second), time.Since(t0).Round(time.Second), row, reopened)
+}
+
+// (10) The sweeper gives up (timeout 20s: three republishes, then CANCELLED 'agreement timed out') while swap is down;
+// the late lock then reopens the negotiation as AGREED and the competitor is cancelled.
+func TestChaosLateLockAfterAgreementTimeout(t *testing.T) {
+	c := chaosSetup(t)
+	withAgreementTimeout(t, "20s")
+	f := newFlow(t, c)
+
+	chaos.StopService(t, "swap")
+	f.approve()
+	harness.Poll(t, "the sweeper to give up (CANCELLED, agreement timed out)", 6*time.Minute, func() (bool, string) {
+		row := f.negotiationRow()
+		return strings.HasPrefix(row, "CANCELLED|agreement timed out|"), row
+	})
+	cancelledAt := time.Since(f.approvedAt)
+	competitor := f.u1.Negotiation(f.nC.GetId()).GetStatus()
+	t.Logf("negotiation cancelled by the sweeper after %s; competitor is %s", cancelledAt.Round(time.Second), competitor)
+	harness.Require(t, f.swapStatusDB() == "", "swap rows exist although swap is down: %v", f.swapRows())
+
+	t0 := time.Now()
+	chaos.StartService(t, "swap", defaultDeadline)
+	f.waitSwap(convergeTimeout, swapAwaiting)
+	f.waitNeg(f.negID(), convergeTimeout, negAgreed)
+	f.waitNeg(f.nC.GetId(), convergeTimeout, negCancelled)
+	f.assertConsistent()
+	row := f.negotiationRow()
+	harness.Require(t, strings.HasPrefix(row, "AGREED||"), "reopened negotiation row is %q, want AGREED with an empty cancel reason", row)
+	f.payAll(convergeTimeout)
+	f.assertConsistent()
+	record(t, "PASS sweeper cancelled the negotiation %s after the approval (swap down); late lock %s after the swap start reopened it as AGREED (row %q), competitor (was %s) CANCELLED, one swap, fees -> COMPLETED",
+		cancelledAt.Round(time.Second), time.Since(t0).Round(time.Second), row, competitor)
+}
+
+// (11) Kafka is down for 70 s, longer than the consumer session timeout, around the agreement. Producers and
+// consumers must reconnect and rejoin their groups on their own.
+func TestChaosKafkaDownLongerThanSessionTimeout(t *testing.T) {
+	c := chaosSetup(t)
+	f := newFlow(t, c)
+
+	chaos.StopKafka(t)
+	f.approve()
+	sleep(t, 70*time.Second, "Kafka is down longer than the session timeout; the outbox must hold AgreementReached")
+	pending := chaos.PsqlInt(t, "negotiation", "SELECT count(*) FROM outbox WHERE published_at IS NULL")
+	harness.Require(t, pending >= 1, "expected unpublished outbox rows while Kafka is down, found %d", pending)
+	harness.Require(t, f.swapStatusDB() == "", "swap created while Kafka is down: %v", f.swapRows())
+
+	t0 := time.Now()
+	chaos.StartKafka(t)
+	_, took := f.waitLocked(3 * time.Minute)
+	f.assertConsistent()
+	left := chaos.PsqlInt(t, "negotiation", "SELECT count(*) FROM outbox WHERE published_at IS NULL")
+	harness.Require(t, left == 0, "negotiation outbox still has %d unpublished rows after recovery", left)
+	f.payAll(convergeTimeout)
+	f.assertConsistent()
+	// Work started after the recovery must flow without any restart.
+	g := newFlow(t, c)
+	g.approve()
+	_, tookG := g.waitLocked(convergeTimeout)
+	g.assertConsistent()
+	record(t, "PASS Kafka down 70 s (> 45 s session timeout) around the 4th approval; outbox held %d row(s); converged %s after Kafka start (%s total); a fresh flow afterwards locked in %s without any restart",
+		pending, took.Round(time.Second), time.Since(t0).Round(time.Second), tookG.Round(time.Second))
+}

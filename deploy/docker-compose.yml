@@ -35,7 +35,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_NUM_PARTITIONS: 3
+      # Topics are auto-created with this many partitions (only when first created: make reset to change it).
+      KAFKA_NUM_PARTITIONS: 6
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
       interval: 5s
@@ -46,13 +47,43 @@ services:
     image: envoyproxy/envoy:v1.34.14
     command: ["-c", "/etc/envoy/envoy.yaml"]
     volumes:
-      - ../gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      # Rendered by scripts/gen-envoy-config.sh (make up runs it; run it once before a plain `docker compose up`).
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./envoy/jwks.json:/etc/envoy/jwks.json:ro
       - ../gateway/descriptor.binpb:/etc/envoy/descriptor.binpb:ro
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:9901:9901"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Optional metrics stack: docker compose -f deploy/docker-compose.yml --profile observability up -d
+  # Prometheus scrapes the host-run services on host.docker.internal:9101..9104 (/metrics); Grafana has the
+  # datasource and the "Taakht MVP overview" dashboard provisioned. Both are published on loopback only.
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["observability"]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=2d"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["127.0.0.1:9090:9090"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    profiles: ["observability"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [prometheus]
 
 volumes:
   pgdata:

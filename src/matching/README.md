@@ -19,7 +19,9 @@ Manual calls: `grpcurl -plaintext -H 'x-user-id: user-1' -d '{"criteria":{"want_
 ## Behavior
 
 - Consumes `ad.events` (group `matching`): `AdPublished`, `AdEdited`, `AdReleased` upsert the snapshot when its status is PUBLISHED, otherwise remove the ad; `AdHidden`, `AdLocked`, `AdClosed` remove it. Removal keeps a tombstone row (`removed`, `last_seq`). Every event carries the ad's `seq`; an event with `seq <= last_seq` is ignored (so a replayed older publish cannot resurrect a removed ad, and a newer `AdReleased` of the same version re-adds it). Events without `seq` (legacy) use the old version check and never override sequenced state.
-- After an ad is indexed, its top 5 two-sided matches get a `MatchFound` outbox event, once per pair (`notified_pair`).
+- After an ad is indexed, its top 5 two-sided matches get a `MatchFound` outbox event, deduplicated per (ad, matched ad, event `seq` of the ad) through `notified_pair`: a newer event for the ad (edit, or re-add after a release) clears the ad's pairs first so it notifies again, while a redelivery of the same event does not. Events without `seq` keep once-per-pair.
+- Tombstones older than `TOMBSTONE_RETENTION` (default `7d`, minimum `1m`) are pruned by housekeeping. Pruning re-opens the replay window for a removed ad, so keep it longer than the retention of `ad.events`.
+- `ELIGIBILITY_FILE` is re-read within 30 s of a change; an invalid file is ignored and logged.
 - Undecodable event payloads are permanent failures (logged at error level, recorded as processed, stored in `dead_letter`, skipped) so one poison message cannot block the partition.
 - `FindMatches`: a malformed `ad_id` is `INVALID_ARGUMENT`, database errors are `INTERNAL`; it needs the caller's ad to be in the index (published); otherwise `NOT_FOUND`.
 - Score: `1.0` + `0.5` per side that names the other ad explicitly (not "open") + proximity `0..1` (`1/(1+km/10)` for the closest neighborhood pair, `1` for a shared neighborhood, `0.5` when a side names none). Code: `internal/scoring`.

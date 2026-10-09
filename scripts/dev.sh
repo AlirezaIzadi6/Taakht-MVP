@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run the whole Taakht MVP locally: infra via docker compose, four services on the host.
 # Usage: scripts/dev.sh start [svc...] | stop | status | logs <svc> | restart [svc]
+# A service counts as ready when GET /readyz on its health port answers 200 (ad 9101, matching 9102, negotiation 9103, swap 9104):
+# database reachable, consumer joined, outbox not stuck. Not merely when the gRPC port is open.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +25,7 @@ export PATH
 
 SERVICES=(ad matching negotiation swap)
 declare -A PORT=([ad]=9001 [matching]=9002 [negotiation]=9003 [swap]=9004)
+declare -A HPORT=([ad]=9101 [matching]=9102 [negotiation]=9103 [swap]=9104) # HTTP /healthz /readyz /metrics
 declare -A KIND=([ad]=go [matching]=go [negotiation]=dotnet [swap]=dotnet)
 WAIT_SECS="${WAIT_SECS:-60}"
 PAYMENT_DEADLINE="${PAYMENT_DEADLINE:-2m}"
@@ -54,6 +57,9 @@ exists() {
 }
 
 port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+
+# HTTP code of GET /readyz on the health port of service $1: 200 ready, 503 not ready, 000 no answer.
+ready_code() { curl -s -o /dev/null -m 3 -w '%{http_code}' "http://127.0.0.1:${HPORT[$1]}/readyz" 2>/dev/null || echo 000; }
 
 # Windows PIDs listening on a TCP port.
 listeners() {
@@ -105,8 +111,10 @@ run_svc() {
   : >"$log"
   export DATABASE_URL="${DB_BASE}/$s?sslmode=disable" KAFKA_BROKERS GRPC_ADDR=":$p" AD_ADDR="${AD_ADDR:-127.0.0.1:9001}"
   export ELIGIBILITY_FILE="${ELIGIBILITY_FILE:-$WROOT/config/eligibility.json}"
+  export HEALTH_ADDR="${HEALTH_BIND:-127.0.0.1}:${HPORT[$s]}" # per service; HEALTH_BIND=0.0.0.0 lets a container scrape it
   export PAYMENT_DEADLINE TAAKHT_GRPC_REFLECTION="${TAAKHT_GRPC_REFLECTION:-on}"
   export INTERNAL_AUTH_TOKEN="${INTERNAL_AUTH_TOKEN:-dev-internal-token}" # DEV ONLY default; proves system: callers
+  export CONSUMER_CONCURRENCY="${CONSUMER_CONCURRENCY:-4}" # partitions handled in parallel per consumer (default 1 in the services)
   export ConnectionStrings__Default="${DB_BASE}/$s?sslmode=disable"
   export ASPNETCORE_ENVIRONMENT=Development DOTNET_ENVIRONMENT=Development
   local wdir cmdline
@@ -133,8 +141,8 @@ wait_ready() {
   local s="$1" p="${PORT[$1]}" i pid
   pid="$(svc_pid "$s")"
   for ((i = 0; i < WAIT_SECS * 2; i++)); do
-    if port_open "$p"; then
-      echo "    $s ready on :$p (pid $pid)"
+    if [ "$(ready_code "$s")" = 200 ]; then
+      echo "    $s ready on :$p (health :${HPORT[$s]}, pid $pid)"
       return 0
     fi
     if ! pid_alive "$pid"; then
@@ -144,7 +152,7 @@ wait_ready() {
     fi
     sleep 0.5
   done
-  echo "ERROR: $s did not open :$p within ${WAIT_SECS}s. Last log lines:" >&2
+  echo "ERROR: $s was not ready within ${WAIT_SECS}s ($(curl -s -m 3 "http://127.0.0.1:${HPORT[$s]}/readyz" 2>/dev/null | tr '\n' ' ')). Last log lines:" >&2
   tail -n 25 "$LOGS/$s.log" >&2
   return 1
 }
@@ -207,7 +215,7 @@ cmd_start() {
     rc=$?
     case $rc in 0) started+=("$s") ;; 2) ;; *) failed=1 ;; esac
   done
-  echo "==> waiting for gRPC ports"
+  echo "==> waiting for readiness (/readyz)"
   for s in "${started[@]}"; do wait_ready "$s" || failed=1; done
   echo
   cmd_status
@@ -222,8 +230,8 @@ cmd_stop() {
 }
 
 cmd_status() {
-  printf '%-12s %-6s %-9s %s\n' SERVICE PORT STATE PID
-  local s pid state
+  printf '%-12s %-6s %-9s %-10s %s\n' SERVICE PORT STATE READY PID
+  local s pid state ready
   for s in "${SERVICES[@]}"; do
     pid="$(svc_pid "$s")"
     if ! exists "$s"; then
@@ -235,7 +243,8 @@ cmd_status() {
     else
       state="down"
     fi
-    printf '%-12s %-6s %-9s %s\n' "$s" "${PORT[$s]}" "$state" "${pid:--}"
+    case "$(ready_code "$s")" in 200) ready=ready ;; 503) ready=not-ready ;; *) ready=- ;; esac
+    printf '%-12s %-6s %-9s %-10s %s\n' "$s" "${PORT[$s]}" "$state" "$ready" "${pid:--}"
   done
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/taakht/taakht/libs/goplatform/identity"
 	"github.com/taakht/taakht/libs/goplatform/outbox"
 	"github.com/taakht/taakht/libs/goplatform/pagination"
+	"github.com/taakht/taakht/libs/goplatform/reload"
 	"github.com/taakht/taakht/src/ad/internal/eligibility"
 
 	"github.com/google/uuid"
@@ -24,16 +25,21 @@ import (
 type Service struct {
 	adv1.UnimplementedAdServiceServer
 	pool *pgxpool.Pool
-	elig *eligibility.Config
+	elig *reload.Reloadable[eligibility.Config]
 }
 
-// NewService wires the service to its database and eligibility config.
+// NewService wires the service to its database and a fixed eligibility config.
 func NewService(pool *pgxpool.Pool, elig *eligibility.Config) *Service {
+	return &Service{pool: pool, elig: reload.Static(elig)}
+}
+
+// NewReloadableService is NewService with an eligibility config that main refreshes when the file changes.
+func NewReloadableService(pool *pgxpool.Pool, elig *reload.Reloadable[eligibility.Config]) *Service {
 	return &Service{pool: pool, elig: elig}
 }
 
 func (s *Service) CreateAd(ctx context.Context, req *adv1.CreateAdRequest) (*adv1.Ad, error) {
-	if err := ValidateSpec(req.GetSpec(), s.elig); err != nil {
+	if err := ValidateSpec(req.GetSpec(), s.elig.Get()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	id := uuid.New()
@@ -57,7 +63,7 @@ func (s *Service) EditAd(ctx context.Context, req *adv1.EditAdRequest) (*adv1.Ad
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateSpec(req.GetSpec(), s.elig); err != nil {
+	if err := ValidateSpec(req.GetSpec(), s.elig.Get()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	var result *adv1.Ad

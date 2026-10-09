@@ -21,6 +21,8 @@
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="Grpc.AspNetCore" Version="2.83.0" />
     <PackageVersion Include="Grpc.AspNetCore.Server.Reflection" Version="2.83.0" />
+    <PackageVersion Include="Grpc.AspNetCore.HealthChecks" Version="2.83.0" />
+    <PackageVersion Include="prometheus-net.AspNetCore" Version="8.2.1" />
     <PackageVersion Include="Grpc.Net.ClientFactory" Version="2.83.0" />
     <PackageVersion Include="Dapper" Version="2.1.86" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />

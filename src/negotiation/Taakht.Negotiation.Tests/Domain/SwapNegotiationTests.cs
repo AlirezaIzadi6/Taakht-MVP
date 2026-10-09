@@ -473,6 +473,35 @@ public class SwapNegotiationTests
     }
 
     [Fact]
+    public void ReopenCancelledAsAgreed_OnlyForExactlyTheExpectedReason()
+    {
+        var timedOut = AllApproved();
+        timedOut.ReachAgreement(_versions, _now);
+        timedOut.Cancel("agreement timed out", _now);
+        var version = timedOut.Version;
+
+        Assert.False(timedOut.ReopenCancelledAsAgreed("something else", _now));
+        Assert.Equal(NegotiationStatus.Cancelled, timedOut.Status);
+
+        Assert.True(timedOut.ReopenCancelledAsAgreed("agreement timed out", _now));
+        Assert.Equal(NegotiationStatus.Agreed, timedOut.Status);
+        Assert.Equal(string.Empty, timedOut.CancelReason);
+        Assert.Equal(version + 1, timedOut.Version);
+        Assert.False(timedOut.ReopenCancelledAsAgreed("agreement timed out", _now)); // idempotent
+
+        var rejected = AllApproved();
+        rejected.ReachAgreement(_versions, _now);
+        rejected.Cancel("ad locked by another swap", _now);
+        Assert.False(rejected.ReopenCancelledAsAgreed("agreement timed out", _now));
+        Assert.Equal(NegotiationStatus.Cancelled, rejected.Status);
+        Assert.Equal("ad locked by another swap", rejected.CancelReason);
+
+        var open = Open();
+        Assert.False(open.ReopenCancelledAsAgreed("agreement timed out", _now));
+        Assert.Equal(NegotiationStatus.Open, open.Status);
+    }
+
+    [Fact]
     public void Mutations_BumpVersion()
     {
         var n = Open();

@@ -1,0 +1,207 @@
+{
+ "script": "negotiate",
+ "date": "2026-10-09T05:53:59.102Z",
+ "params": {
+  "VUS": 320,
+  "DURATION": "60s",
+  "POLL_MS": 100,
+  "THINK": 0.2
+ },
+ "metrics": {
+  "http_req_waiting": {
+   "avg": 209.59633412930995,
+   "min": 3.2493,
+   "med": 212.2319,
+   "max": 953.7433,
+   "p(90)": 271.25606000000005,
+   "p(95)": 334.2789050000001,
+   "p(99)": 734.1328609999986
+  },
+  "vus": {
+   "min": 0,
+   "max": 320,
+   "value": 0
+  },
+  "http_req_duration": {
+   "max": 954.2766,
+   "p(90)": 271.34389,
+   "p(95)": 334.3239800000003,
+   "p(99)": 734.2483939999992,
+   "avg": 209.68961396798116,
+   "min": 3.2493,
+   "med": 212.3008
+  },
+  "iteration_ok": {
+   "rate": 1,
+   "passes": 1562,
+   "fails": 0
+  },
+  "time_to_agreed": {
+   "med": 15208.5,
+   "max": 29129,
+   "p(90)": 22430.800000000003,
+   "p(95)": 25081.95,
+   "p(99)": 27790.73,
+   "avg": 13793.921895006402,
+   "min": 373
+  },
+  "data_received": {
+   "count": 140370295,
+   "rate": 1652217.310990986
+  },
+  "http_req_receiving": {
+   "min": 0,
+   "med": 0,
+   "max": 5.1981,
+   "p(90)": 0.5339,
+   "p(95)": 0.5462,
+   "p(99)": 0.7473109999999942,
+   "avg": 0.08038524876847282
+  },
+  "unexpected_status": {
+   "passes": 0,
+   "fails": 81200,
+   "rate": 0
+  },
+  "http_req_blocked": {
+   "p(95)": 0,
+   "p(99)": 0.4732349999998245,
+   "avg": 0.007730504926108376,
+   "min": 0,
+   "med": 0,
+   "max": 28.7241,
+   "p(90)": 0
+  },
+  "time_to_ads_closed": {
+   "avg": 13809.919974391805,
+   "min": 384,
+   "med": 15225,
+   "max": 29142,
+   "p(90)": 22460.7,
+   "p(95)": 25100.95,
+   "p(99)": 27809.969999999998
+  },
+  "http_req_duration{name:open negotiation}": {
+   "p(99)": 379.727546,
+   "avg": 240.96598508322666,
+   "min": 33.5095,
+   "med": 258.95489999999995,
+   "max": 420.0656,
+   "p(90)": 321.29371,
+   "p(95)": 339.83603999999985
+  },
+  "api_calls": {
+   "count": 81200,
+   "rate": 955.7580943494352
+  },
+  "iterations": {
+   "count": 1562,
+   "rate": 18.385395854357363
+  },
+  "http_reqs": {
+   "count": 81200,
+   "rate": 955.7580943494352
+  },
+  "checks": {
+   "rate": 1,
+   "passes": 17182,
+   "fails": 0
+  },
+  "http_req_failed": {
+   "passes": 0,
+   "fails": 81200,
+   "rate": 0
+  },
+  "iteration_duration": {
+   "p(95)": 26916.56998499999,
+   "p(99)": 29605.20628899999,
+   "avg": 15326.849397375177,
+   "min": 813.9094,
+   "med": 16899.53535,
+   "max": 30705.4951,
+   "p(90)": 24276.336860000007
+  },
+  "http_req_connecting": {
+   "avg": 0.0034664470443349776,
+   "min": 0,
+   "med": 0,
+   "max": 2.677,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0
+  },
+  "http_req_sending": {
+   "avg": 0.012894589901477824,
+   "min": 0,
+   "med": 0,
+   "max": 4.5466,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0.5414
+  },
+  "data_sent": {
+   "count": 33151116,
+   "rate": 390202.55484873237
+  },
+  "http_req_tls_handshaking": {
+   "min": 0,
+   "med": 0,
+   "max": 0,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0,
+   "avg": 0
+  },
+  "vus_max": {
+   "max": 320,
+   "value": 320,
+   "min": 320
+  }
+ },
+ "thresholds": {
+  "iteration_ok rate>0.99": "pass",
+  "time_to_agreed p(95)<2000": "FAIL",
+  "unexpected_status rate<0.01": "pass",
+  "time_to_ads_closed p(95)<5000": "FAIL",
+  "http_req_duration{name:open negotiation} p(95)<1000": "pass",
+  "http_req_failed rate<0.01": "pass"
+ },
+ "root_group_checks": {
+  "create ad 200": {
+   "passes": 3124,
+   "fails": 0
+  },
+  "publish ad 200": {
+   "passes": 3124,
+   "fails": 0
+  },
+  "open negotiation 200": {
+   "passes": 1562,
+   "fails": 0
+  },
+  "approve ad 200": {
+   "passes": 1562,
+   "fails": 0
+  },
+  "approve proposal (1st) 200": {
+   "passes": 1562,
+   "fails": 0
+  },
+  "approve proposal (final) 200": {
+   "passes": 1562,
+   "fails": 0
+  },
+  "final approval -> AGREEMENT_PENDING or AGREED": {
+   "passes": 1562,
+   "fails": 0
+  },
+  "negotiation reached AGREED": {
+   "passes": 1562,
+   "fails": 0
+  },
+  "target ad reached CLOSED": {
+   "passes": 1562,
+   "fails": 0
+  }
+ }
+}
