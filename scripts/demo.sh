@@ -50,8 +50,8 @@ else
 fi
 
 # ---------- tooling ----------
-export PATH="$PATH:/c/Users/USER/go/bin:/c/Program Files/Go/bin"
-for d in /c/Users/USER/AppData/Local/Microsoft/WinGet/Packages/jqlang.jq_*; do
+export PATH="$PATH:$HOME/go/bin:/c/Program Files/Go/bin"
+for d in "${LOCALAPPDATA:+$(cygpath -u "$LOCALAPPDATA" 2>/dev/null)}"/Microsoft/WinGet/Packages/jqlang.jq_*; do
   [ -d "$d" ] && PATH="$PATH:$d"
 done
 

@@ -2,7 +2,7 @@
 # Writes tests/load/.tokens.json ({"user-1": "<jwt>", ...}) for k6, which cannot exec processes.
 # Tokens come from tools/devtoken (dev JWTs for the Envoy edge). The file is git-ignored.
 set -euo pipefail
-export PATH="$PATH:/c/Users/USER/go/bin:/c/Program Files/Go/bin"
+export PATH="$PATH:$HOME/go/bin:/c/Program Files/Go/bin"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 
