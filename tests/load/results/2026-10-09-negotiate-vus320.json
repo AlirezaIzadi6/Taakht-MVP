@@ -1,0 +1,207 @@
+{
+ "script": "negotiate",
+ "date": "2026-10-09T01:44:45.853Z",
+ "params": {
+  "VUS": 320,
+  "DURATION": "45s",
+  "POLL_MS": 100,
+  "THINK": 0.2
+ },
+ "metrics": {
+  "http_req_duration": {
+   "avg": 734.8475461378638,
+   "min": 2.7174,
+   "med": 34.6582,
+   "max": 15011.0229,
+   "p(90)": 4031.3962100000003,
+   "p(95)": 4980.869384999999,
+   "p(99)": 8351.980592000004
+  },
+  "http_req_duration{name:open negotiation}": {
+   "p(99)": 11898.867851,
+   "avg": 3416.2809320954916,
+   "min": 17.9203,
+   "med": 1512.6952,
+   "max": 12906.0195,
+   "p(90)": 8003.34126,
+   "p(95)": 11542.09324500001
+  },
+  "http_req_waiting": {
+   "med": 34.56515,
+   "max": 15011.0229,
+   "p(90)": 4031.3962100000003,
+   "p(95)": 4980.869384999999,
+   "p(99)": 8351.980592000004,
+   "avg": 734.7626040864102,
+   "min": 2.7174
+  },
+  "iteration_ok": {
+   "rate": 0.21352785145888595,
+   "passes": 161,
+   "fails": 593
+  },
+  "http_req_failed": {
+   "passes": 95,
+   "fails": 30225,
+   "rate": 0.003133245382585752
+  },
+  "data_sent": {
+   "count": 11911205,
+   "rate": 105357.88557752245
+  },
+  "http_req_blocked": {
+   "max": 20.5018,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0.5613,
+   "avg": 0.01436162928759896,
+   "min": 0,
+   "med": 0
+  },
+  "vus": {
+   "value": 0,
+   "min": 0,
+   "max": 320
+  },
+  "http_req_sending": {
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0.539,
+   "avg": 0.011614218337730846,
+   "min": 0,
+   "med": 0,
+   "max": 2.0624
+  },
+  "http_req_tls_handshaking": {
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0,
+   "avg": 0,
+   "min": 0,
+   "med": 0,
+   "max": 0
+  },
+  "time_to_ads_closed": {
+   "avg": 11959.621118012423,
+   "min": 366,
+   "med": 3378,
+   "max": 29176,
+   "p(90)": 27205,
+   "p(95)": 27749,
+   "p(99)": 28685.600000000002
+  },
+  "unexpected_status": {
+   "rate": 0.0031461120678235527,
+   "passes": 95,
+   "fails": 30101
+  },
+  "http_reqs": {
+   "rate": 268.18874250845994,
+   "count": 30320
+  },
+  "iteration_duration": {
+   "max": 57050.1038,
+   "p(90)": 48701.19322,
+   "p(95)": 52101.359724999995,
+   "p(99)": 52768.700862000005,
+   "avg": 32931.69409628647,
+   "min": 653.2561,
+   "med": 36206.17405
+  },
+  "http_req_receiving": {
+   "max": 3.0614,
+   "p(90)": 0.5274,
+   "p(95)": 0.545005,
+   "p(99)": 0.7658340000000018,
+   "avg": 0.07332783311345656,
+   "min": 0,
+   "med": 0
+  },
+  "time_to_agreed": {
+   "p(90)": 27268.4,
+   "p(95)": 27897.949999999997,
+   "p(99)": 28936.979999999996,
+   "avg": 12095.839506172839,
+   "min": 362,
+   "med": 3498.5,
+   "max": 36770
+  },
+  "http_req_connecting": {
+   "p(95)": 0,
+   "p(99)": 0.5261240000000005,
+   "avg": 0.010681381926121373,
+   "min": 0,
+   "med": 0,
+   "max": 2.2736,
+   "p(90)": 0
+  },
+  "checks": {
+   "rate": 0.8591319618665328,
+   "passes": 6849,
+   "fails": 1123
+  },
+  "iterations": {
+   "count": 754,
+   "rate": 6.669337462116715
+  },
+  "vus_max": {
+   "value": 320,
+   "min": 320,
+   "max": 320
+  },
+  "data_received": {
+   "count": 50556863,
+   "rate": 447189.36388992367
+  },
+  "api_calls": {
+   "count": 30196,
+   "rate": 267.0919283900216
+  }
+ },
+ "thresholds": {
+  "http_req_duration{name:open negotiation} p(95)<1000": "FAIL",
+  "iteration_ok rate>0.99": "FAIL",
+  "http_req_failed rate<0.01": "pass",
+  "time_to_ads_closed p(95)<5000": "FAIL",
+  "unexpected_status rate<0.01": "pass",
+  "time_to_agreed p(95)<2000": "FAIL"
+ },
+ "root_group_checks": {
+  "create ad 200": {
+   "passes": 1508,
+   "fails": 0
+  },
+  "publish ad 200": {
+   "passes": 1508,
+   "fails": 0
+  },
+  "open negotiation 200": {
+   "passes": 740,
+   "fails": 14
+  },
+  "approve ad 200": {
+   "passes": 694,
+   "fails": 46
+  },
+  "approve proposal (1st) 200": {
+   "passes": 692,
+   "fails": 2
+  },
+  "approve proposal (final) 200": {
+   "passes": 692,
+   "fails": 0
+  },
+  "final approval -> AGREEMENT_PENDING or AGREED": {
+   "passes": 692,
+   "fails": 0
+  },
+  "negotiation reached AGREED": {
+   "passes": 162,
+   "fails": 530
+  },
+  "target ad reached CLOSED": {
+   "passes": 161,
+   "fails": 531
+  }
+ }
+}

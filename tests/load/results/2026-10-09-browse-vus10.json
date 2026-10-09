@@ -1,0 +1,171 @@
+{
+ "script": "browse",
+ "date": "2026-10-09T01:27:17.877Z",
+ "params": {
+  "VUS": 10,
+  "DURATION": "45s",
+  "ADS": 200,
+  "THINK": 0.1
+ },
+ "metrics": {
+  "http_req_tls_handshaking": {
+   "avg": 0,
+   "min": 0,
+   "med": 0,
+   "max": 0,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0
+  },
+  "vus": {
+   "max": 10,
+   "value": 1,
+   "min": 0
+  },
+  "http_req_failed": {
+   "passes": 0,
+   "fails": 5371,
+   "rate": 0
+  },
+  "http_req_connecting": {
+   "med": 0,
+   "max": 1.1685,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0,
+   "avg": 0.0016663749767268667,
+   "min": 0
+  },
+  "http_req_blocked": {
+   "max": 14.6032,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0.3399600000000084,
+   "avg": 0.00968648296406628,
+   "min": 0,
+   "med": 0
+  },
+  "http_req_receiving": {
+   "avg": 0.09115051200893697,
+   "min": 0,
+   "med": 0,
+   "max": 1.5449,
+   "p(90)": 0.5445,
+   "p(95)": 0.60185,
+   "p(99)": 0.7644600000000003
+  },
+  "api_calls": {
+   "rate": 81.0586398186866,
+   "count": 5171
+  },
+  "vus_max": {
+   "value": 10,
+   "min": 10,
+   "max": 10
+  },
+  "http_req_sending": {
+   "p(99)": 0.665170000000001,
+   "avg": 0.025661701731521117,
+   "min": 0,
+   "med": 0,
+   "max": 5.7884,
+   "p(90)": 0,
+   "p(95)": 0
+  },
+  "http_req_waiting": {
+   "p(95)": 15.96695,
+   "p(99)": 19.473640000000014,
+   "avg": 8.9791646993111,
+   "min": 1.7164,
+   "med": 8.5431,
+   "max": 59.7255,
+   "p(90)": 14.3004
+  },
+  "data_sent": {
+   "count": 2262124,
+   "rate": 35460.200065984645
+  },
+  "data_received": {
+   "count": 45577225,
+   "rate": 714451.3373061764
+  },
+  "http_reqs": {
+   "count": 5371,
+   "rate": 84.1937641589955
+  },
+  "checks": {
+   "rate": 1,
+   "passes": 5162,
+   "fails": 0
+  },
+  "iterations": {
+   "count": 4762,
+   "rate": 74.64731054275491
+  },
+  "http_req_duration{name:search}": {
+   "min": 1.7164,
+   "med": 8.36175,
+   "max": 59.7255,
+   "p(90)": 13.723650000000003,
+   "p(95)": 15.1812,
+   "p(99)": 19.0772,
+   "avg": 8.643239870568369
+  },
+  "http_req_duration": {
+   "min": 1.7164,
+   "med": 8.6611,
+   "max": 59.7255,
+   "p(90)": 14.4268,
+   "p(95)": 16.09995,
+   "p(99)": 19.581530000000036,
+   "avg": 9.095976913051548
+  },
+  "http_req_duration{name:list my ads}": {
+   "p(95)": 17.76072499999999,
+   "p(99)": 20.818057000000003,
+   "avg": 10.56074064569537,
+   "min": 3.0688,
+   "med": 10.3119,
+   "max": 28.4727,
+   "p(90)": 16.29578
+  },
+  "iteration_duration": {
+   "avg": 109.81153971020619,
+   "min": 102.1766,
+   "med": 109.4745,
+   "max": 160.7898,
+   "p(90)": 115.30896000000001,
+   "p(95)": 116.986165,
+   "p(99)": 121.15208800000003
+  },
+  "unexpected_status": {
+   "rate": 0,
+   "passes": 0,
+   "fails": 5171
+  }
+ },
+ "thresholds": {
+  "http_req_failed rate<0.01": "pass",
+  "http_req_duration{name:search} p(95)<500": "pass",
+  "http_req_duration{name:list my ads} p(95)<500": "pass",
+  "unexpected_status rate<0.01": "pass"
+ },
+ "root_group_checks": {
+  "list my ads 200": {
+   "passes": 1208,
+   "fails": 0
+  },
+  "search 200": {
+   "passes": 3554,
+   "fails": 0
+  },
+  "create ad 200": {
+   "passes": 200,
+   "fails": 0
+  },
+  "publish ad 200": {
+   "passes": 200,
+   "fails": 0
+  }
+ }
+}

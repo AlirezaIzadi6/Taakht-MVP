@@ -1,0 +1,207 @@
+{
+ "script": "negotiate",
+ "date": "2026-10-09T01:36:23.506Z",
+ "params": {
+  "VUS": 5,
+  "DURATION": "45s",
+  "POLL_MS": 100,
+  "THINK": 0.2
+ },
+ "metrics": {
+  "time_to_ads_closed": {
+   "p(95)": 614.7499999999999,
+   "p(99)": 4147.369999999998,
+   "avg": 556.7893081761006,
+   "min": 150,
+   "med": 389,
+   "max": 6137,
+   "p(90)": 599.3
+  },
+  "vus": {
+   "value": 1,
+   "min": 0,
+   "max": 5
+  },
+  "http_req_failed": {
+   "rate": 0,
+   "passes": 0,
+   "fails": 4521
+  },
+  "data_received": {
+   "count": 6616954,
+   "rate": 101269.8426642605
+  },
+  "iteration_duration": {
+   "avg": 855.9103811320755,
+   "min": 439.9268,
+   "med": 696.4854,
+   "max": 6426.9571,
+   "p(90)": 896.40253,
+   "p(95)": 919.2383699999999,
+   "p(99)": 4414.868033999998
+  },
+  "iterations": {
+   "count": 318,
+   "rate": 4.86686320733601
+  },
+  "http_req_receiving": {
+   "avg": 0.0679174076531741,
+   "min": 0,
+   "med": 0,
+   "max": 3.0696,
+   "p(90)": 0.5147,
+   "p(95)": 0.5544,
+   "p(99)": 0.7326200000000015
+  },
+  "http_req_connecting": {
+   "p(99)": 0,
+   "avg": 0.0028648307896483077,
+   "min": 0,
+   "med": 0,
+   "max": 2.9378,
+   "p(90)": 0,
+   "p(95)": 0
+  },
+  "http_req_tls_handshaking": {
+   "avg": 0,
+   "min": 0,
+   "med": 0,
+   "max": 0,
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0
+  },
+  "http_req_duration{name:open negotiation}": {
+   "avg": 21.198910691823908,
+   "min": 13.712,
+   "med": 20.3422,
+   "max": 74.7658,
+   "p(90)": 27.29099,
+   "p(95)": 29.832214999999998,
+   "p(99)": 37.11620699999994
+  },
+  "http_reqs": {
+   "count": 4521,
+   "rate": 69.19210239108837
+  },
+  "unexpected_status": {
+   "passes": 0,
+   "fails": 4521,
+   "rate": 0
+  },
+  "data_sent": {
+   "count": 1906653,
+   "rate": 29180.563946090642
+  },
+  "vus_max": {
+   "max": 5,
+   "value": 5,
+   "min": 5
+  },
+  "checks": {
+   "rate": 1,
+   "passes": 3498,
+   "fails": 0
+  },
+  "http_req_duration": {
+   "avg": 16.322480491041773,
+   "min": 2.193,
+   "med": 10.1865,
+   "max": 4091.4816,
+   "p(90)": 25.731,
+   "p(95)": 32.2545,
+   "p(99)": 44.200660000000006
+  },
+  "http_req_blocked": {
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0,
+   "avg": 0.010164543242645428,
+   "min": 0,
+   "med": 0,
+   "max": 19.9835
+  },
+  "http_req_sending": {
+   "p(90)": 0,
+   "p(95)": 0,
+   "p(99)": 0.5529800000000004,
+   "avg": 0.013396903339969029,
+   "min": 0,
+   "med": 0,
+   "max": 2.0598
+  },
+  "http_req_waiting": {
+   "max": 4091.4816,
+   "p(90)": 25.6297,
+   "p(95)": 32.1537,
+   "p(99)": 44.10624000000006,
+   "avg": 16.241166180048623,
+   "min": 2.193,
+   "med": 10.0764
+  },
+  "iteration_ok": {
+   "rate": 1,
+   "passes": 318,
+   "fails": 0
+  },
+  "time_to_agreed": {
+   "p(95)": 610.0499999999998,
+   "p(99)": 4143.199999999998,
+   "avg": 550.940251572327,
+   "min": 147,
+   "med": 385,
+   "max": 6134,
+   "p(90)": 593.3
+  },
+  "api_calls": {
+   "count": 4521,
+   "rate": 69.19210239108837
+  }
+ },
+ "thresholds": {
+  "time_to_ads_closed p(95)<5000": "pass",
+  "http_req_failed rate<0.01": "pass",
+  "http_req_duration{name:open negotiation} p(95)<1000": "pass",
+  "unexpected_status rate<0.01": "pass",
+  "iteration_ok rate>0.99": "pass",
+  "time_to_agreed p(95)<2000": "pass"
+ },
+ "root_group_checks": {
+  "create ad 200": {
+   "passes": 636,
+   "fails": 0
+  },
+  "publish ad 200": {
+   "passes": 636,
+   "fails": 0
+  },
+  "open negotiation 200": {
+   "passes": 318,
+   "fails": 0
+  },
+  "approve ad 200": {
+   "passes": 318,
+   "fails": 0
+  },
+  "approve proposal (1st) 200": {
+   "passes": 318,
+   "fails": 0
+  },
+  "approve proposal (final) 200": {
+   "passes": 318,
+   "fails": 0
+  },
+  "final approval -> AGREEMENT_PENDING or AGREED": {
+   "passes": 318,
+   "fails": 0
+  },
+  "negotiation reached AGREED": {
+   "passes": 318,
+   "fails": 0
+  },
+  "target ad reached CLOSED": {
+   "passes": 318,
+   "fails": 0
+  }
+ }
+}
