@@ -35,13 +35,13 @@ All service-to-service and client calls are defined in Protobuf first (`api/prot
 
 | Event | Producer | Consumers |
 |---|---|---|
-| `AdPublished`, `AdEdited`, `AdHidden` (full version snapshot in payload) | ad | matching |
-| `AdLocked`, `AdReleased`, `AdClosed` | ad | matching (index add/remove) |
+| `AdPublished`, `AdEdited` (full version snapshot in payload), `AdReleased` (full snapshot after release) | ad | matching (upsert or remove); negotiation (updates its copy of the ad's current version) |
+| `AdHidden`, `AdLocked`, `AdClosed` (ad id, swap id where relevant; no snapshot) | ad | matching (remove from the index). Every ad event also carries a per-ad `seq` |
 | `MatchFound` | matching | none (logged; stands in for the notification) |
 | `NegotiationOpened`, `NegotiationClosed` | negotiation | none in MVP (the open-negotiation cap is enforced inside negotiation) |
 | `AgreementReached` (ad ids, versions, proposal) | negotiation | swap |
 | `ExclusiveLockAcquired`, `SwapRejected` | swap | negotiation (cancel competing negotiations / cancel this one) |
-| `SwapCompleted`, `SwapCancelled` | swap | ad (close / release); negotiation consumes `SwapCancelled` only (`AGREED` -> `CANCELLED`) |
+| `SwapCompleted`, `SwapCancelled` | swap | ad (close / release); negotiation consumes `SwapCancelled` only (`AGREED` -> `CANCELLED`, found by the `negotiation_id` both events now carry) |
 
 ## The one flow the demo must show
 
@@ -97,7 +97,7 @@ If steps 1-5 and 7 run from one script, the MVP is done. Step 6 is the first thi
 - **Local tooling:** resolved; the machine has Go 1.27.2 and .NET SDK 10.0.401, and `global.json` and `go.work` pins match.
 - **Scope creep from the design docs:** anything not in the flow above waits until after the demo.
 
-## Status (2026-10-08)
+## Status (2026-10-09)
 
 What exists is described in [MVP architecture](../architecture/mvp-architecture.md), which also lists where the code differs from this plan and the remaining gaps. The [demo walkthrough](demo-walkthrough.md) shows the REST scenario; [Running locally](../guidelines/running-locally.md) shows how to start the stack.
 
@@ -107,15 +107,15 @@ Test counts are from the last runs recorded for this repository: .NET suites as 
 
 | Part | What is built | Verified |
 |---|---|---|
-| `libs/goplatform` (Go) | DB open and migrations, identity interceptors (system identities, id validation), gRPC server helper (reflection opt-in), outbox writer (`clock_timestamp()` ordering) and relay, idempotent consumer with permanent-error skipping | `go test` passes for `libs/goplatform` and its `identity` package, including the Kafka round trip when `KAFKA_BROKERS` is set |
-| `libs/dotnet/Taakht.Platform` | The same pieces for .NET (`PermanentEventException`, consumer survives `KafkaException`) | 16 tests |
-| ad (Go) | Create, edit (versions), publish, hide, get (owner / system / published-only visibility), list, `LockAds` (`system:swap` only); consumes `SwapCompleted` / `SwapCancelled`; input caps | `go test` passes for `src/ad/internal/ad` (rules, lifecycle, lock rules and idempotency, concurrent overlapping locks, swap event consumers) |
-| matching (Go) | Index from `ad.events`, `Search`, `FindMatches`, scoring, `MatchFound` once per pair | `go test` passes for handlers, scoring and service packages |
-| negotiation (.NET) | Open (with cap), approve ad, revise, approve, reject, close, get, list; final synchronous check; `AgreementReached`; reacts to `ExclusiveLockAcquired`, `SwapRejected` and `SwapCancelled`; migration 002 drops `ad_ref.status` | 66 tests |
-| swap (.NET) | Lock saga, `SimulateLockerFeePaid` (own leg, dev only), payment deadline sweeper, mock partner, `SwapCompleted` / `SwapCancelled` | 46 tests |
+| `libs/goplatform` (Go) | DB open and migrations, identity interceptors (system identities, id validation), gRPC server helper (reflection opt-in), outbox writer (`clock_timestamp()` ordering) and relay, idempotent consumer with permanent-error skipping into `dead_letter`, housekeeping (outbox, processed events, dead letters) | `go test` passes for `libs/goplatform` and its `identity` package, including the Kafka round trip when `KAFKA_BROKERS` is set |
+| `libs/dotnet/Taakht.Platform` | The same pieces for .NET (`PermanentEventException` into `dead_letter`, consumer survives `KafkaException` and logs unreadable events at error level, relay orders by `created_at, id`) | 69 tests |
+| ad (Go) | Create, edit (versions; an unchanged spec is a no-op), publish, hide, get (owner / system / published-only visibility, one `NOT_FOUND` message), list, `LockAds` (`system:swap` only); consumes `SwapCompleted` / `SwapCancelled`; per-ad event `seq`; input caps | `go test` passes for `src/ad/internal/ad` (rules, lifecycle, lock rules and idempotency, concurrent overlapping locks, swap event consumers) |
+| matching (Go) | Index from `ad.events` with `seq` ordering and tombstones, `Search`, `FindMatches`, scoring, `MatchFound` once per pair | `go test` passes for handlers, scoring and service packages |
+| negotiation (.NET) | Open (with cap), approve ad, revise, approve, reject, close, get, list; final synchronous check; `AgreementReached`; reacts to `ExclusiveLockAcquired` (only for an existing `AGREEMENT_PENDING`/`AGREED` winner), `SwapRejected` and `SwapCancelled` (by negotiation id); `AGREEMENT_PENDING` sweeper (republish, then cancel); both ads on every response; `ad not available` answers | 74 tests |
+| swap (.NET) | Lock saga, `SimulateLockerFeePaid` (own leg, dev only), payment deadline sweeper, mock partner, `SwapCompleted` / `SwapCancelled` with the negotiation id; malformed `AgreementReached` becomes a rejected swap; `PAYMENT_DEADLINE` bounds | 60 tests |
 | Gateway | Envoy on `:8080`: REST/JSON to gRPC, JWT validation, `sub` written to `x-user-id`; dev token tool `tools/devtoken` | Exercised by `scripts/demo.sh` |
 | Scripts | `scripts/dev.sh` (start, stop, status, logs, restart; turns gRPC reflection on), `make dev / reset / e2e / scenario / demo` | Used to bring the stack up for the demo run |
-| End-to-end | `tests/e2e` (happy path, payment timeout, lock race, locker eligibility, ad-and-matching only; gRPC, run with `E2E=1` against the running stack) and `scripts/demo.sh` (narrated REST flow, plus a `timeout` variant) | The test file and the demo script exist; the demo walkthrough contains output of a real run. The `tests/e2e` suite was not re-run while updating this document. In CI the `e2e` job is informational (`continue-on-error`) |
+| End-to-end | `tests/e2e` (happy path, payment timeout, lock race, locker eligibility, ad-and-matching only; gRPC, run with `E2E=1` against the running stack) and `scripts/demo.sh` (narrated REST flow, plus a `timeout` variant) | The test file and the demo script exist; the demo walkthrough contains output of a real run. The `tests/e2e` suite (including `TestPaymentTimeout` with `PAYMENT_DEADLINE=5s`) and `scripts/demo.sh` were re-run on 2026-10-09 against the rebuilt stack and passed. In CI the `e2e` job is informational (`continue-on-error`) |
 
 Not covered by any test: a failure of Kafka or of a service in the middle of the saga (the behavior in the architecture document is derived from the code), and killing a consumer between the handler commit and the offset commit.
 
@@ -126,6 +126,6 @@ Not covered by any test: a failure of Kafka or of a service in the middle of the
 | Load test results | Not done; no throughput or latency numbers exist |
 | Fault-injection tests (Kafka or a service down mid-saga) | Not done |
 | Deployment beyond the local host (containers for the services, a real identity provider, service-to-service authentication) | Not done; services run as host processes, the gateway uses a static dev key |
-| Repair for stuck `AGREEMENT_PENDING` / `LOCKING`, DLQ, clearing `notified_pair` | Not done; listed in the architecture document's known gaps |
+| Repair for a swap stuck in `LOCKING` (other than the sweeper's republished `AgreementReached`), a `dead_letter` replay tool and alerting, clearing `notified_pair`, pruning matching tombstones, reconciling a swap that locks after its negotiation was cancelled for timing out | Not done; listed in the architecture document's known gaps. `AGREEMENT_PENDING` itself now has a bounded sweeper and `dead_letter` keeps skipped events |
 | Enforcing that user ids never start with `system:` | Not done (token issuer); see the architecture document |
 | Recorded learnings (ADR notes) | Five drafts written ([outbox](../adr/drafts/use-a-transactional-outbox-for-events.md), [idempotent consumers](../adr/drafts/make-consumers-idempotent-with-a-processed-events-table.md), [ad lock](../adr/drafts/take-the-exclusive-ad-lock-in-the-ad-service.md), [Negotiation/Swap split](../adr/drafts/keep-negotiation-and-swap-as-separate-services.md), [versioned approvals](../adr/drafts/bind-approvals-to-versions.md)); none accepted yet |

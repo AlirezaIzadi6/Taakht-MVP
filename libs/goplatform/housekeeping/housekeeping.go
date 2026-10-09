@@ -22,29 +22,32 @@ import (
 
 // Defaults and limits.
 const (
-	DefaultOutboxRetention    = 24 * time.Hour
-	DefaultProcessedRetention = 7 * 24 * time.Hour
-	DefaultInterval           = 10 * time.Minute
-	DefaultInitialDelay       = 30 * time.Second
-	DefaultBatchSize          = 1000
-	MinDuration               = time.Minute
+	DefaultOutboxRetention     = 24 * time.Hour
+	DefaultProcessedRetention  = 7 * 24 * time.Hour
+	DefaultDeadLetterRetention = 30 * 24 * time.Hour
+	DefaultInterval            = 10 * time.Minute
+	DefaultInitialDelay        = 30 * time.Second
+	DefaultBatchSize           = 1000
+	MinDuration                = time.Minute
 )
 
 // Environment variable names.
 const (
-	EnvOutboxRetention    = "OUTBOX_RETENTION"
-	EnvProcessedRetention = "PROCESSED_EVENTS_RETENTION"
-	EnvInterval           = "PRUNE_INTERVAL"
+	EnvOutboxRetention     = "OUTBOX_RETENTION"
+	EnvProcessedRetention  = "PROCESSED_EVENTS_RETENTION"
+	EnvDeadLetterRetention = "DEAD_LETTER_RETENTION"
+	EnvInterval            = "PRUNE_INTERVAL"
 )
 
 // Options configures Run. Zero values select the defaults.
 type Options struct {
-	OutboxRetention    time.Duration // published outbox rows older than this are deleted
-	ProcessedRetention time.Duration // processed_events rows older than this are deleted
-	Interval           time.Duration // time between sweeps
-	InitialDelay       time.Duration // delay before the first sweep; 0 selects the default
-	BatchSize          int           // rows per DELETE statement
-	Logger             *slog.Logger
+	OutboxRetention     time.Duration // published outbox rows older than this are deleted
+	ProcessedRetention  time.Duration // processed_events rows older than this are deleted
+	DeadLetterRetention time.Duration // dead_letter rows older than this are deleted
+	Interval            time.Duration // time between sweeps
+	InitialDelay        time.Duration // delay before the first sweep; 0 selects the default
+	BatchSize           int           // rows per DELETE statement
+	Logger              *slog.Logger
 }
 
 func (o Options) withDefaults() Options {
@@ -53,6 +56,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.ProcessedRetention == 0 {
 		o.ProcessedRetention = DefaultProcessedRetention
+	}
+	if o.DeadLetterRetention == 0 {
+		o.DeadLetterRetention = DefaultDeadLetterRetention
 	}
 	if o.Interval == 0 {
 		o.Interval = DefaultInterval
@@ -73,9 +79,10 @@ func (o Options) withDefaults() Options {
 func (o Options) Validate() error {
 	o = o.withDefaults()
 	for name, d := range map[string]time.Duration{
-		EnvOutboxRetention:    o.OutboxRetention,
-		EnvProcessedRetention: o.ProcessedRetention,
-		EnvInterval:           o.Interval,
+		EnvOutboxRetention:     o.OutboxRetention,
+		EnvProcessedRetention:  o.ProcessedRetention,
+		EnvDeadLetterRetention: o.DeadLetterRetention,
+		EnvInterval:            o.Interval,
 	} {
 		if d < MinDuration {
 			return fmt.Errorf("housekeeping: %s=%s is below the minimum of %s", name, d, MinDuration)
@@ -83,6 +90,9 @@ func (o Options) Validate() error {
 	}
 	return nil
 }
+
+// maxDays keeps day-based durations far from time.Duration overflow (about 292 years).
+const maxDays = 36500
 
 var dayPrefix = regexp.MustCompile(`^(\d+)d(.*)$`)
 
@@ -93,6 +103,9 @@ func ParseDuration(s string) (time.Duration, error) {
 		days, err := strconv.Atoi(m[1])
 		if err != nil {
 			return 0, fmt.Errorf("invalid duration %q: %w", s, err)
+		}
+		if days > maxDays {
+			return 0, fmt.Errorf("invalid duration %q: more than %d days", s, maxDays)
 		}
 		d := time.Duration(days) * 24 * time.Hour
 		if m[2] != "" {
@@ -111,7 +124,7 @@ func ParseDuration(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// OptionsFromEnv reads OUTBOX_RETENTION, PROCESSED_EVENTS_RETENTION and PRUNE_INTERVAL,
+// OptionsFromEnv reads OUTBOX_RETENTION, PROCESSED_EVENTS_RETENTION, DEAD_LETTER_RETENTION and PRUNE_INTERVAL,
 // falling back to the defaults, and validates the result.
 func OptionsFromEnv() (Options, error) {
 	var o Options
@@ -121,6 +134,7 @@ func OptionsFromEnv() (Options, error) {
 	}{
 		{EnvOutboxRetention, &o.OutboxRetention},
 		{EnvProcessedRetention, &o.ProcessedRetention},
+		{EnvDeadLetterRetention, &o.DeadLetterRetention},
 		{EnvInterval, &o.Interval},
 	} {
 		v := os.Getenv(f.env)
@@ -155,16 +169,16 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 			return nil
 		case <-timer.C:
 		}
-		if _, _, err := PruneOnce(ctx, pool, opts); err != nil && ctx.Err() == nil {
+		if _, _, _, err := PruneOnce(ctx, pool, opts); err != nil && ctx.Err() == nil {
 			opts.Logger.Error("housekeeping: prune failed", "err", err)
 		}
 		timer.Reset(opts.Interval)
 	}
 }
 
-// PruneOnce runs one sweep and returns how many outbox and processed_events rows were deleted.
+// PruneOnce runs one sweep and returns how many outbox, processed_events and dead_letter rows were deleted.
 // It logs at info only when something was deleted.
-func PruneOnce(ctx context.Context, pool *pgxpool.Pool, opts Options) (outboxDeleted, processedDeleted int64, err error) {
+func PruneOnce(ctx context.Context, pool *pgxpool.Pool, opts Options) (outboxDeleted, processedDeleted, deadLetterDeleted int64, err error) {
 	opts = opts.withDefaults()
 	outboxDeleted, err = deleteBatches(ctx, pool, opts.BatchSize, opts.OutboxRetention,
 		`DELETE FROM outbox WHERE id IN (
@@ -172,7 +186,7 @@ func PruneOnce(ctx context.Context, pool *pgxpool.Pool, opts Options) (outboxDel
 			WHERE published_at IS NOT NULL AND published_at < now() - ($1 * interval '1 second')
 			LIMIT $2 FOR UPDATE SKIP LOCKED)`)
 	if err != nil {
-		return outboxDeleted, 0, fmt.Errorf("prune outbox: %w", err)
+		return outboxDeleted, 0, 0, fmt.Errorf("prune outbox: %w", err)
 	}
 	processedDeleted, err = deleteBatches(ctx, pool, opts.BatchSize, opts.ProcessedRetention,
 		`DELETE FROM processed_events WHERE (consumer, event_id) IN (
@@ -180,13 +194,22 @@ func PruneOnce(ctx context.Context, pool *pgxpool.Pool, opts Options) (outboxDel
 			WHERE processed_at < now() - ($1 * interval '1 second')
 			LIMIT $2 FOR UPDATE SKIP LOCKED)`)
 	if err != nil {
-		return outboxDeleted, processedDeleted, fmt.Errorf("prune processed_events: %w", err)
+		return outboxDeleted, processedDeleted, 0, fmt.Errorf("prune processed_events: %w", err)
 	}
-	if outboxDeleted > 0 || processedDeleted > 0 {
+	deadLetterDeleted, err = deleteBatches(ctx, pool, opts.BatchSize, opts.DeadLetterRetention,
+		`DELETE FROM dead_letter WHERE (consumer, event_id) IN (
+			SELECT consumer, event_id FROM dead_letter
+			WHERE created_at < now() - ($1 * interval '1 second')
+			LIMIT $2 FOR UPDATE SKIP LOCKED)`)
+	if err != nil {
+		return outboxDeleted, processedDeleted, deadLetterDeleted, fmt.Errorf("prune dead_letter: %w", err)
+	}
+	if outboxDeleted > 0 || processedDeleted > 0 || deadLetterDeleted > 0 {
 		opts.Logger.Info("housekeeping: pruned",
-			"outbox_deleted", outboxDeleted, "processed_events_deleted", processedDeleted)
+			"outbox_deleted", outboxDeleted, "processed_events_deleted", processedDeleted,
+			"dead_letter_deleted", deadLetterDeleted)
 	}
-	return outboxDeleted, processedDeleted, nil
+	return outboxDeleted, processedDeleted, deadLetterDeleted, nil
 }
 
 // deleteBatches repeats the statement until a batch deletes fewer rows than the batch size.

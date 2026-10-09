@@ -191,6 +191,16 @@ public class PipelineIntegrationTests
             }
 
             Assert.Equal(["good"], handled);
+
+            // The explicit poison event is kept with its envelope and error; the undecodable one is a decode failure
+            // raised by the handler wrapper only when the type is handled, here it is the same permanent path.
+            await using var dl = db.CreateCommand("SELECT topic, payload, error FROM dead_letter WHERE event_id = @e");
+            dl.Parameters.AddWithValue("e", Guid.Parse(explicitPoison.EventId));
+            await using var reader = await dl.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync(), "dead_letter row for the poison event");
+            Assert.Equal(topic, reader.GetString(0));
+            Assert.Equal(explicitPoison.Type, Envelope.Parser.ParseFrom((byte[])reader[1]).Type);
+            Assert.Contains("poison", reader.GetString(2), StringComparison.Ordinal);
         }
         finally
         {

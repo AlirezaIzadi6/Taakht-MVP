@@ -20,9 +20,12 @@ type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// Upsert stores the snapshot unless the index already holds a newer version.
-// It reports whether the row was written.
-func Upsert(ctx context.Context, q Querier, ad *adv1.Ad) (bool, error) {
+// Upsert stores the snapshot of a published ad carried by an event with the given seq. It reports whether the
+// row was written. With seq > 0 an event applies only when it is newer than the last one seen for the ad
+// (tombstones included), so a replayed older event cannot overwrite or resurrect anything; a re-added ad
+// clears its tombstone. Events without a seq (seq 0, written before the counter existed) fall back to
+// the version check and never touch an ad that already has sequenced state.
+func Upsert(ctx context.Context, q Querier, ad *adv1.Ad, seq int64) (bool, error) {
 	snap, err := proto.Marshal(ad)
 	if err != nil {
 		return false, fmt.Errorf("marshal snapshot: %w", err)
@@ -30,32 +33,53 @@ func Upsert(ctx context.Context, q Querier, ad *adv1.Ad) (bool, error) {
 	spec := ad.GetSpec()
 	tag, err := q.Exec(ctx, `
 INSERT INTO ad_index (ad_id, owner_id, status, version, have_category, want_categories,
-                      neighborhood_ids, title, value_estimate, snapshot, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+                      neighborhood_ids, title, value_estimate, snapshot, last_seq, removed, removed_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, NULL, now())
 ON CONFLICT (ad_id) DO UPDATE SET
   owner_id = EXCLUDED.owner_id, status = EXCLUDED.status, version = EXCLUDED.version,
   have_category = EXCLUDED.have_category, want_categories = EXCLUDED.want_categories,
   neighborhood_ids = EXCLUDED.neighborhood_ids, title = EXCLUDED.title,
-  value_estimate = EXCLUDED.value_estimate, snapshot = EXCLUDED.snapshot, updated_at = now()
-WHERE ad_index.version <= EXCLUDED.version`,
+  value_estimate = EXCLUDED.value_estimate, snapshot = EXCLUDED.snapshot,
+  last_seq = GREATEST(ad_index.last_seq, EXCLUDED.last_seq), removed = false, removed_at = NULL, updated_at = now()
+WHERE (EXCLUDED.last_seq > 0 AND ad_index.last_seq < EXCLUDED.last_seq)
+   OR (EXCLUDED.last_seq = 0 AND ad_index.last_seq = 0 AND NOT ad_index.removed AND ad_index.version <= EXCLUDED.version)`,
 		ad.GetId(), ad.GetOwnerId(), ad.GetStatus().String(), ad.GetVersion(),
 		spec.GetHaveCategory(), nonNil(spec.GetWantCategories()), nonNil(spec.GetNeighborhoodIds()),
-		spec.GetTitle(), spec.GetValueEstimate(), snap)
+		spec.GetTitle(), spec.GetValueEstimate(), snap, seq)
 	if err != nil {
 		return false, err
 	}
 	return tag.RowsAffected() == 1, nil
 }
 
-func Delete(ctx context.Context, q Querier, adID string) error {
-	_, err := q.Exec(ctx, `DELETE FROM ad_index WHERE ad_id = $1`, adID)
-	return err
+// Remove takes an ad out of the search results while keeping a tombstone row (removed, last_seq) so
+// that older events cannot bring it back. It reports whether the event was applied. Without a seq
+// (legacy event) the row is deleted, unless it already holds sequenced state, in which case the legacy
+// event is older than that state and ignored.
+func Remove(ctx context.Context, q Querier, adID string, seq int64) (bool, error) {
+	if seq <= 0 {
+		tag, err := q.Exec(ctx, `DELETE FROM ad_index WHERE ad_id = $1 AND last_seq = 0`, adID)
+		if err != nil {
+			return false, err
+		}
+		return tag.RowsAffected() == 1, nil
+	}
+	tag, err := q.Exec(ctx, `
+INSERT INTO ad_index (ad_id, owner_id, status, version, have_category, snapshot, last_seq, removed, removed_at, updated_at)
+VALUES ($1, '', 'AD_STATUS_REMOVED', 0, '', ''::bytea, $2, true, now(), now())
+ON CONFLICT (ad_id) DO UPDATE SET
+  status = 'AD_STATUS_REMOVED', last_seq = EXCLUDED.last_seq, removed = true, removed_at = now(), updated_at = now()
+WHERE ad_index.last_seq < EXCLUDED.last_seq`, adID, seq)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
-// Get returns the indexed ad, or nil when it is not indexed.
+// Get returns the indexed ad, or nil when it is not indexed (a tombstone counts as not indexed).
 func Get(ctx context.Context, q Querier, adID string) (*adv1.Ad, error) {
 	var snap []byte
-	err := q.QueryRow(ctx, `SELECT snapshot FROM ad_index WHERE ad_id = $1`, adID).Scan(&snap)
+	err := q.QueryRow(ctx, `SELECT snapshot FROM ad_index WHERE ad_id = $1 AND NOT removed`, adID).Scan(&snap)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -84,7 +108,7 @@ const MaxCandidates = 1000
 func Candidates(ctx context.Context, q Querier, f Filter) ([]*adv1.Ad, error) {
 	rows, err := q.Query(ctx, `
 SELECT snapshot FROM ad_index
-WHERE status = 'AD_STATUS_PUBLISHED'
+WHERE NOT removed AND status = 'AD_STATUS_PUBLISHED'
   AND ($1 = '' OR owner_id <> $1)
   AND ($2 = '' OR ad_id <> $2::uuid)
   AND (cardinality($3::text[]) = 0 OR have_category = ANY($3))

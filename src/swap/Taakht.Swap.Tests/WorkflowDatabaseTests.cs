@@ -10,6 +10,7 @@ using Taakht.Swap.Domain;
 using Taakht.Swap.Infrastructure;
 using DomainDelivery = Taakht.Swap.Domain.DeliveryMethod;
 using PbDelivery = Taakht.Negotiation.V1.DeliveryMethod;
+using SwapPb = Taakht.Swap.V1;
 
 namespace Taakht.Swap.Tests;
 
@@ -291,5 +292,73 @@ public class WorkflowDatabaseTests(TestDatabase db) : IClassFixture<TestDatabase
         Assert.DoesNotContain(await store.ListForUserAsync("user-3", CancellationToken.None), s => s.Id == swap.Id);
         Assert.False(swap.IsParty("user-3"));
         Assert.Equal(DomainDelivery.Locker, swap.LegA.Method);
+    }
+
+    [DbFact]
+    public async Task Malformed_agreement_with_a_negotiation_id_is_rejected_and_announced()
+    {
+        var ads = new FakeAdClient();
+        var (workflow, store, _) = Build(ads);
+        var broken = new AgreementReached { NegotiationId = "neg-malformed", AdA = new AgreedAd { AdId = "x", OwnerId = "user-1", Version = 1 } };
+
+        await workflow.HandleAgreementReachedAsync(broken, CancellationToken.None);
+        await workflow.HandleAgreementReachedAsync(broken, CancellationToken.None); // redelivery changes nothing
+
+        var swap = await SwapOfAsync(store, "neg-malformed");
+        Assert.Equal(SwapStatus.Rejected, swap.Status);
+        Assert.Equal(SwapWorkflow.MalformedReason, swap.CancelReason);
+        Assert.Empty(ads.Calls);
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        var envelopes = (await conn.QueryAsync<byte[]>(
+            "SELECT envelope FROM outbox WHERE key = @k", new { k = swap.Id.ToString() })).Select(Envelope.Parser.ParseFrom).ToList();
+        var rejected = Assert.Single(envelopes);
+        var payload = SwapPb.SwapRejected.Parser.ParseFrom(rejected.Payload);
+        Assert.Equal("neg-malformed", payload.NegotiationId);
+        Assert.Equal("malformed agreement", payload.Reason);
+    }
+
+    [DbFact]
+    public async Task Malformed_agreement_without_a_negotiation_id_creates_nothing()
+    {
+        var (workflow, _, _) = Build(new FakeAdClient());
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        var before = await conn.QuerySingleAsync<int>("SELECT count(*) FROM swap");
+
+        await workflow.HandleAgreementReachedAsync(new AgreementReached { AdA = new AgreedAd { AdId = "a" } }, CancellationToken.None);
+
+        Assert.Equal(before, await conn.QuerySingleAsync<int>("SELECT count(*) FROM swap"));
+    }
+
+    [DbFact]
+    public async Task Malformed_duplicate_does_not_reject_a_wellformed_swap()
+    {
+        var (workflow, store, _) = Build(new FakeAdClient());
+        await workflow.HandleAgreementReachedAsync(Agreement("neg-good-then-bad"), CancellationToken.None);
+
+        await workflow.HandleAgreementReachedAsync(new AgreementReached { NegotiationId = "neg-good-then-bad" }, CancellationToken.None);
+
+        Assert.Equal(SwapStatus.AwaitingPayment, (await SwapOfAsync(store, "neg-good-then-bad")).Status);
+    }
+
+    [DbFact]
+    public async Task Completed_and_cancelled_events_carry_the_negotiation_id()
+    {
+        var (workflow, store, clock) = Build(new FakeAdClient());
+        await workflow.HandleAgreementReachedAsync(Agreement("neg-ev-done", PbDelivery.InPerson, PbDelivery.InPerson), CancellationToken.None);
+        await workflow.HandleAgreementReachedAsync(Agreement("neg-ev-cancel"), CancellationToken.None);
+        clock.Advance(_window + TimeSpan.FromSeconds(1));
+        await workflow.SweepOverdueAsync(CancellationToken.None);
+
+        var done = await SwapOfAsync(store, "neg-ev-done");
+        var cancelled = await SwapOfAsync(store, "neg-ev-cancel");
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        async Task<Envelope> OfTypeAsync(Guid swapId, string type) =>
+            (await conn.QueryAsync<byte[]>("SELECT envelope FROM outbox WHERE key = @k", new { k = swapId.ToString() }))
+                .Select(Envelope.Parser.ParseFrom).Single(e => e.Type == type);
+
+        var completedEvent = SwapPb.SwapCompleted.Parser.ParseFrom((await OfTypeAsync(done.Id, SwapPb.SwapCompleted.Descriptor.FullName)).Payload);
+        Assert.Equal("neg-ev-done", completedEvent.NegotiationId);
+        var cancelledEvent = SwapPb.SwapCancelled.Parser.ParseFrom((await OfTypeAsync(cancelled.Id, SwapPb.SwapCancelled.Descriptor.FullName)).Payload);
+        Assert.Equal("neg-ev-cancel", cancelledEvent.NegotiationId);
     }
 }

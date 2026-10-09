@@ -22,6 +22,18 @@ public class GrpcAdClientTests
         Assert.Equal(SystemIdentities.Negotiation, invoker.UserHeader);
     }
 
+    [Fact]
+    public async Task GetAdDetails_returns_the_full_ad_as_the_negotiation_system_identity()
+    {
+        var invoker = new CapturingInvoker();
+        var client = new GrpcAdClient(new AdService.AdServiceClient(invoker));
+
+        var ad = await client.GetAdDetailsAsync("ad-1", CancellationToken.None);
+
+        Assert.Equal("ad-1", ad?.Id);
+        Assert.Equal(SystemIdentities.Negotiation, invoker.UserHeader);
+    }
+
     private sealed class CapturingInvoker : CallInvoker
     {
         public string? UserHeader { get; private set; }

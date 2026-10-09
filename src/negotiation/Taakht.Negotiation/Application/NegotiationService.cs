@@ -21,6 +21,7 @@ public sealed class NegotiationService(
     ILogger<NegotiationService> logger)
 {
     public const string Topic = "negotiation.events";
+    public const string AgreementTimedOutReason = "agreement timed out";
 
     private const string _pgUniqueViolation = "23505";
 
@@ -32,9 +33,9 @@ public sealed class NegotiationService(
         }
 
         var requesterAd = await ads.GetAdAsync(requesterAdId, ct)
-            ?? throw new DomainException(DomainError.NotFound, "requester ad not found");
+            ?? throw new DomainException(DomainError.NotFound, SwapNegotiation.AdNotAvailable);
         var targetAd = await ads.GetAdAsync(targetAdId, ct)
-            ?? throw new DomainException(DomainError.NotFound, "target ad not found");
+            ?? throw new DomainException(DomainError.NotFound, SwapNegotiation.AdNotAvailable);
 
         var negotiation = SwapNegotiation.Open(Guid.NewGuid(), requesterAd, targetAd, userId, clock.GetUtcNow());
 
@@ -81,12 +82,12 @@ public sealed class NegotiationService(
         await tx.CommitAsync(ct);
 
         var versions = await VersionsAsync(conn, null, negotiation, ct);
-        return new NegotiationView(negotiation, versions);
+        return await WithAdsAsync(new NegotiationView(negotiation, versions), ct);
     }
 
     public async Task<NegotiationView> ApproveAdAsync(string userId, Guid negotiationId, int adVersion, CancellationToken ct)
     {
-        var peek = await GetAsync(userId, negotiationId, ct);
+        var peek = await LoadViewAsync(userId, negotiationId, ct);
         var otherAdId = peek.Negotiation.AdApprovedBy(userId);
         var otherAd = await ads.GetAdAsync(otherAdId, ct)
             ?? throw new DomainException(DomainError.NotFound, "ad not found");
@@ -97,13 +98,13 @@ public sealed class NegotiationService(
             await NegotiationRepository.UpsertAdRefAsync(conn, tx, otherAd, ct);
         }, ct);
 
-        return await TryReachAgreementAsync(negotiationId, ct);
+        return await WithAdsAsync(await TryReachAgreementAsync(negotiationId, ct), ct);
     }
 
     public async Task<NegotiationView> ReviseProposalAsync(
         string userId, Guid negotiationId, int seenProposalNumber, Terms terms, CancellationToken ct)
     {
-        var peek = await GetAsync(userId, negotiationId, ct);
+        var peek = await LoadViewAsync(userId, negotiationId, ct);
         foreach (var owner in peek.Negotiation.LockerLegOwners(terms))
         {
             if (!await lockerEligibility.IsEligibleAsync(owner, ct))
@@ -129,7 +130,7 @@ public sealed class NegotiationService(
             return Task.CompletedTask;
         }, ct);
 
-        return await TryReachAgreementAsync(negotiationId, ct);
+        return await WithAdsAsync(await TryReachAgreementAsync(negotiationId, ct), ct);
     }
 
     public async Task<NegotiationView> RejectProposalAsync(string userId, Guid negotiationId, int proposalNumber, CancellationToken ct)
@@ -154,7 +155,10 @@ public sealed class NegotiationService(
         return await GetAsync(userId, negotiationId, ct);
     }
 
-    public async Task<NegotiationView> GetAsync(string userId, Guid negotiationId, CancellationToken ct)
+    public async Task<NegotiationView> GetAsync(string userId, Guid negotiationId, CancellationToken ct) =>
+        await WithAdsAsync(await LoadViewAsync(userId, negotiationId, ct), ct);
+
+    private async Task<NegotiationView> LoadViewAsync(string userId, Guid negotiationId, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var n = await NegotiationRepository.LoadAsync(conn, null, negotiationId, false, ct)
@@ -174,7 +178,64 @@ public sealed class NegotiationService(
         var negotiations = await NegotiationRepository.LoadManyAsync(conn, null, ids, false, ct);
         var versions = await NegotiationRepository.AdVersionsAsync(
             conn, null, [.. negotiations.SelectMany(n => new[] { n.RequesterAdId, n.TargetAdId }).Distinct()], ct);
-        return [.. negotiations.Select(n => new NegotiationView(n, ToVersions(n, versions)))];
+        return await WithAdsAsync([.. negotiations.Select(n => new NegotiationView(n, ToVersions(n, versions)))], ct);
+    }
+
+    /// <summary>
+    /// Counterpart visibility: the two ads of a negotiation, as the Ad service shows them now. Only the parties get here.
+    /// A failing or missing ad leaves its field empty (logged); it never fails the call.
+    /// </summary>
+    private async Task<NegotiationView> WithAdsAsync(NegotiationView view, CancellationToken ct) =>
+        (await WithAdsAsync([view], ct))[0];
+
+    private async Task<IReadOnlyList<NegotiationView>> WithAdsAsync(IReadOnlyList<NegotiationView> views, CancellationToken ct)
+    {
+        if (views.Count == 0)
+        {
+            return views;
+        }
+
+        // One fetch per distinct ad within this request, a few at a time.
+        using var gate = new SemaphoreSlim(8);
+        var fetches = new Dictionary<string, Task<Taakht.Ad.V1.Ad?>>(StringComparer.Ordinal);
+        foreach (var adId in views.SelectMany(v => new[] { v.Negotiation.RequesterAdId, v.Negotiation.TargetAdId }))
+        {
+            if (!fetches.ContainsKey(adId))
+            {
+                fetches[adId] = FetchAdAsync(adId, gate, ct);
+            }
+        }
+
+        await Task.WhenAll(fetches.Values);
+        var result = new List<NegotiationView>(views.Count);
+        foreach (var v in views)
+        {
+            result.Add(v with
+            {
+                RequesterAd = await fetches[v.Negotiation.RequesterAdId],
+                TargetAd = await fetches[v.Negotiation.TargetAdId],
+            });
+        }
+
+        return result;
+    }
+
+    private async Task<Taakht.Ad.V1.Ad?> FetchAdAsync(string adId, SemaphoreSlim gate, CancellationToken ct)
+    {
+        await gate.WaitAsync(ct);
+        try
+        {
+            return await ads.GetAdDetailsAsync(adId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Could not read ad {AdId} for a negotiation response; returning it without the ad", adId);
+            return null;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     private static AdVersions ToVersions(SwapNegotiation n, Dictionary<string, int> versions) =>
@@ -251,13 +312,8 @@ public sealed class NegotiationService(
 
         locked.ReachAgreement(synced, clock.GetUtcNow());
         await NegotiationRepository.SaveAsync(conn, tx, locked, ct);
-        await Outbox.AddAsync(conn, tx, Topic, locked.Id.ToString(), new NegV1.AgreementReached
-        {
-            NegotiationId = locked.Id.ToString(),
-            AdA = new NegV1.AgreedAd { AdId = locked.RequesterAdId, OwnerId = locked.RequesterUserId, Version = synced.RequesterAdVersion },
-            AdB = new NegV1.AgreedAd { AdId = locked.TargetAdId, OwnerId = locked.TargetUserId, Version = synced.TargetAdVersion },
-            Terms = Mapper.ToProto(locked.ActiveProposal.Terms),
-        }, ct);
+        await NegotiationRepository.SetAgreedVersionsAsync(conn, tx, locked.Id, synced.RequesterAdVersion, synced.TargetAdVersion, ct);
+        await Outbox.AddAsync(conn, tx, Topic, locked.Id.ToString(), BuildAgreement(locked, synced), ct);
         await tx.CommitAsync(ct);
 
         if (logger.IsEnabled(LogLevel.Information))
@@ -274,6 +330,68 @@ public sealed class NegotiationService(
         var n = await NegotiationRepository.LoadAsync(conn, null, negotiationId, false, ct)
             ?? throw new DomainException(DomainError.NotFound, "negotiation not found");
         return new NegotiationView(n, await VersionsAsync(conn, null, n, ct));
+    }
+
+    private static NegV1.AgreementReached BuildAgreement(SwapNegotiation n, AdVersions versions) => new()
+    {
+        NegotiationId = n.Id.ToString(),
+        AdA = new NegV1.AgreedAd { AdId = n.RequesterAdId, OwnerId = n.RequesterUserId, Version = versions.RequesterAdVersion },
+        AdB = new NegV1.AgreedAd { AdId = n.TargetAdId, OwnerId = n.TargetUserId, Version = versions.TargetAdVersion },
+        Terms = Mapper.ToProto(n.ActiveProposal.Terms),
+    };
+
+    /// <summary>
+    /// Recovery for negotiations stuck in AGREEMENT_PENDING (the swap never answered). Each negotiation moves through
+    /// periods of <see cref="NegotiationOptions.AgreementPendingTimeout"/>: at the end of a period AgreementReached is
+    /// written to the outbox again (the swap service is idempotent by negotiation id) up to
+    /// <see cref="NegotiationOptions.MaxRepublishes"/> times; if it is still pending after the last period it is
+    /// CANCELLED ("agreement timed out"). It is never cancelled earlier because the swap may be mid-flight.
+    /// Returns the number of negotiations acted on.
+    /// </summary>
+    public async Task<int> SweepAgreementPendingAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var cutoff = now - options.AgreementPendingTimeout;
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var due = await NegotiationRepository.ListDuePendingAsync(conn, cutoff, 100, ct);
+        var acted = 0;
+        foreach (var id in due)
+        {
+            await using var tx = await conn.BeginTransactionAsync(ct);
+            var state = await NegotiationRepository.LockDuePendingAsync(conn, tx, id, cutoff, ct);
+            var n = state is null ? null : await NegotiationRepository.LoadAsync(conn, tx, id, true, ct);
+            if (state is null || n is null)
+            {
+                await tx.RollbackAsync(ct); // answered or handled by someone else in the meantime
+                continue;
+            }
+
+            if (state.RepublishCount >= options.MaxRepublishes)
+            {
+                n.Cancel(AgreementTimedOutReason, now);
+                await NegotiationRepository.SaveAsync(conn, tx, n, ct);
+                await AddClosedEventAsync(conn, tx, n, NegotiationStatus.Cancelled, AgreementTimedOutReason, ct);
+                logger.LogWarning(
+                    "Negotiation {NegotiationId} stayed AGREEMENT_PENDING through {Republishes} republishes; cancelled",
+                    id, state.RepublishCount);
+            }
+            else
+            {
+                var versions = state.RequesterVersion is { } r && state.TargetVersion is { } t
+                    ? new AdVersions(r, t)
+                    : await VersionsAsync(conn, tx, n, ct);
+                await Outbox.AddAsync(conn, tx, Topic, id.ToString(), BuildAgreement(n, versions), ct);
+                await NegotiationRepository.MarkRepublishedAsync(conn, tx, id, now, ct);
+                logger.LogWarning(
+                    "Negotiation {NegotiationId} is still AGREEMENT_PENDING; AgreementReached published again ({Attempt}/{Max})",
+                    id, state.RepublishCount + 1, options.MaxRepublishes);
+            }
+
+            await tx.CommitAsync(ct);
+            acted++;
+        }
+
+        return acted;
     }
 
     internal static Task AddClosedEventAsync(

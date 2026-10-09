@@ -7,6 +7,7 @@
 package negotiationv1
 
 import (
+	v1 "github.com/taakht/taakht/gen/taakht/ad/v1"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -408,8 +409,12 @@ type Negotiation struct {
 	CancelReason    string                 `protobuf:"bytes,9,opt,name=cancel_reason,json=cancelReason,proto3" json:"cancel_reason,omitempty"`
 	CreatedAt       *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt       *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The two ads as they are now (current version), for the parties only. Empty when the Ad service
+	// could not be reached or the ad cannot be read; the rest of the message is still valid.
+	RequesterAd   *v1.Ad `protobuf:"bytes,12,opt,name=requester_ad,json=requesterAd,proto3" json:"requester_ad,omitempty"`
+	TargetAd      *v1.Ad `protobuf:"bytes,13,opt,name=target_ad,json=targetAd,proto3" json:"target_ad,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Negotiation) Reset() {
@@ -515,6 +520,20 @@ func (x *Negotiation) GetCreatedAt() *timestamppb.Timestamp {
 func (x *Negotiation) GetUpdatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.UpdatedAt
+	}
+	return nil
+}
+
+func (x *Negotiation) GetRequesterAd() *v1.Ad {
+	if x != nil {
+		return x.RequesterAd
+	}
+	return nil
+}
+
+func (x *Negotiation) GetTargetAd() *v1.Ad {
+	if x != nil {
+		return x.TargetAd
 	}
 	return nil
 }
@@ -917,7 +936,7 @@ var File_taakht_negotiation_v1_negotiation_proto protoreflect.FileDescriptor
 
 const file_taakht_negotiation_v1_negotiation_proto_rawDesc = "" +
 	"\n" +
-	"'taakht/negotiation/v1/negotiation.proto\x12\x15taakht.negotiation.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xce\x01\n" +
+	"'taakht/negotiation/v1/negotiation.proto\x12\x15taakht.negotiation.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x15taakht/ad/v1/ad.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xce\x01\n" +
 	"\x05Terms\x12:\n" +
 	"\x05leg_a\x18\x01 \x01(\x0e2%.taakht.negotiation.v1.DeliveryMethodR\x04legA\x12:\n" +
 	"\x05leg_b\x18\x02 \x01(\x0e2%.taakht.negotiation.v1.DeliveryMethodR\x04legB\x12)\n" +
@@ -932,7 +951,7 @@ const file_taakht_negotiation_v1_negotiation_proto_rawDesc = "" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x127\n" +
 	"\x04kind\x18\x02 \x01(\x0e2#.taakht.negotiation.v1.ApprovalKindR\x04kind\x12\x16\n" +
 	"\x06target\x18\x03 \x01(\x05R\x06target\x12\x14\n" +
-	"\x05valid\x18\x04 \x01(\bR\x05valid\"\x9f\x04\n" +
+	"\x05valid\x18\x04 \x01(\bR\x05valid\"\x83\x05\n" +
 	"\vNegotiation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12*\n" +
 	"\x11requester_user_id\x18\x02 \x01(\tR\x0frequesterUserId\x12&\n" +
@@ -948,7 +967,9 @@ const file_taakht_negotiation_v1_negotiation_proto_rawDesc = "" +
 	"created_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"b\n" +
+	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x123\n" +
+	"\frequester_ad\x18\f \x01(\v2\x10.taakht.ad.v1.AdR\vrequesterAd\x12-\n" +
+	"\ttarget_ad\x18\r \x01(\v2\x10.taakht.ad.v1.AdR\btargetAd\"b\n" +
 	"\x16OpenNegotiationRequest\x12&\n" +
 	"\x0frequester_ad_id\x18\x01 \x01(\tR\rrequesterAdId\x12 \n" +
 	"\ftarget_ad_id\x18\x02 \x01(\tR\n" +
@@ -1029,6 +1050,7 @@ var file_taakht_negotiation_v1_negotiation_proto_goTypes = []any{
 	(*ListNegotiationsRequest)(nil),  // 13: taakht.negotiation.v1.ListNegotiationsRequest
 	(*ListNegotiationsResponse)(nil), // 14: taakht.negotiation.v1.ListNegotiationsResponse
 	(*timestamppb.Timestamp)(nil),    // 15: google.protobuf.Timestamp
+	(*v1.Ad)(nil),                    // 16: taakht.ad.v1.Ad
 }
 var file_taakht_negotiation_v1_negotiation_proto_depIdxs = []int32{
 	0,  // 0: taakht.negotiation.v1.Terms.leg_a:type_name -> taakht.negotiation.v1.DeliveryMethod
@@ -1040,29 +1062,31 @@ var file_taakht_negotiation_v1_negotiation_proto_depIdxs = []int32{
 	5,  // 6: taakht.negotiation.v1.Negotiation.approvals:type_name -> taakht.negotiation.v1.Approval
 	15, // 7: taakht.negotiation.v1.Negotiation.created_at:type_name -> google.protobuf.Timestamp
 	15, // 8: taakht.negotiation.v1.Negotiation.updated_at:type_name -> google.protobuf.Timestamp
-	3,  // 9: taakht.negotiation.v1.ReviseProposalRequest.terms:type_name -> taakht.negotiation.v1.Terms
-	6,  // 10: taakht.negotiation.v1.ListNegotiationsResponse.negotiations:type_name -> taakht.negotiation.v1.Negotiation
-	7,  // 11: taakht.negotiation.v1.NegotiationService.OpenNegotiation:input_type -> taakht.negotiation.v1.OpenNegotiationRequest
-	8,  // 12: taakht.negotiation.v1.NegotiationService.ApproveAd:input_type -> taakht.negotiation.v1.ApproveAdRequest
-	9,  // 13: taakht.negotiation.v1.NegotiationService.ReviseProposal:input_type -> taakht.negotiation.v1.ReviseProposalRequest
-	10, // 14: taakht.negotiation.v1.NegotiationService.ApproveProposal:input_type -> taakht.negotiation.v1.ProposalRefRequest
-	10, // 15: taakht.negotiation.v1.NegotiationService.RejectProposal:input_type -> taakht.negotiation.v1.ProposalRefRequest
-	11, // 16: taakht.negotiation.v1.NegotiationService.CloseNegotiation:input_type -> taakht.negotiation.v1.CloseNegotiationRequest
-	12, // 17: taakht.negotiation.v1.NegotiationService.GetNegotiation:input_type -> taakht.negotiation.v1.NegotiationIdRequest
-	13, // 18: taakht.negotiation.v1.NegotiationService.ListNegotiations:input_type -> taakht.negotiation.v1.ListNegotiationsRequest
-	6,  // 19: taakht.negotiation.v1.NegotiationService.OpenNegotiation:output_type -> taakht.negotiation.v1.Negotiation
-	6,  // 20: taakht.negotiation.v1.NegotiationService.ApproveAd:output_type -> taakht.negotiation.v1.Negotiation
-	6,  // 21: taakht.negotiation.v1.NegotiationService.ReviseProposal:output_type -> taakht.negotiation.v1.Negotiation
-	6,  // 22: taakht.negotiation.v1.NegotiationService.ApproveProposal:output_type -> taakht.negotiation.v1.Negotiation
-	6,  // 23: taakht.negotiation.v1.NegotiationService.RejectProposal:output_type -> taakht.negotiation.v1.Negotiation
-	6,  // 24: taakht.negotiation.v1.NegotiationService.CloseNegotiation:output_type -> taakht.negotiation.v1.Negotiation
-	6,  // 25: taakht.negotiation.v1.NegotiationService.GetNegotiation:output_type -> taakht.negotiation.v1.Negotiation
-	14, // 26: taakht.negotiation.v1.NegotiationService.ListNegotiations:output_type -> taakht.negotiation.v1.ListNegotiationsResponse
-	19, // [19:27] is the sub-list for method output_type
-	11, // [11:19] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	16, // 9: taakht.negotiation.v1.Negotiation.requester_ad:type_name -> taakht.ad.v1.Ad
+	16, // 10: taakht.negotiation.v1.Negotiation.target_ad:type_name -> taakht.ad.v1.Ad
+	3,  // 11: taakht.negotiation.v1.ReviseProposalRequest.terms:type_name -> taakht.negotiation.v1.Terms
+	6,  // 12: taakht.negotiation.v1.ListNegotiationsResponse.negotiations:type_name -> taakht.negotiation.v1.Negotiation
+	7,  // 13: taakht.negotiation.v1.NegotiationService.OpenNegotiation:input_type -> taakht.negotiation.v1.OpenNegotiationRequest
+	8,  // 14: taakht.negotiation.v1.NegotiationService.ApproveAd:input_type -> taakht.negotiation.v1.ApproveAdRequest
+	9,  // 15: taakht.negotiation.v1.NegotiationService.ReviseProposal:input_type -> taakht.negotiation.v1.ReviseProposalRequest
+	10, // 16: taakht.negotiation.v1.NegotiationService.ApproveProposal:input_type -> taakht.negotiation.v1.ProposalRefRequest
+	10, // 17: taakht.negotiation.v1.NegotiationService.RejectProposal:input_type -> taakht.negotiation.v1.ProposalRefRequest
+	11, // 18: taakht.negotiation.v1.NegotiationService.CloseNegotiation:input_type -> taakht.negotiation.v1.CloseNegotiationRequest
+	12, // 19: taakht.negotiation.v1.NegotiationService.GetNegotiation:input_type -> taakht.negotiation.v1.NegotiationIdRequest
+	13, // 20: taakht.negotiation.v1.NegotiationService.ListNegotiations:input_type -> taakht.negotiation.v1.ListNegotiationsRequest
+	6,  // 21: taakht.negotiation.v1.NegotiationService.OpenNegotiation:output_type -> taakht.negotiation.v1.Negotiation
+	6,  // 22: taakht.negotiation.v1.NegotiationService.ApproveAd:output_type -> taakht.negotiation.v1.Negotiation
+	6,  // 23: taakht.negotiation.v1.NegotiationService.ReviseProposal:output_type -> taakht.negotiation.v1.Negotiation
+	6,  // 24: taakht.negotiation.v1.NegotiationService.ApproveProposal:output_type -> taakht.negotiation.v1.Negotiation
+	6,  // 25: taakht.negotiation.v1.NegotiationService.RejectProposal:output_type -> taakht.negotiation.v1.Negotiation
+	6,  // 26: taakht.negotiation.v1.NegotiationService.CloseNegotiation:output_type -> taakht.negotiation.v1.Negotiation
+	6,  // 27: taakht.negotiation.v1.NegotiationService.GetNegotiation:output_type -> taakht.negotiation.v1.Negotiation
+	14, // 28: taakht.negotiation.v1.NegotiationService.ListNegotiations:output_type -> taakht.negotiation.v1.ListNegotiationsResponse
+	21, // [21:29] is the sub-list for method output_type
+	13, // [13:21] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_taakht_negotiation_v1_negotiation_proto_init() }

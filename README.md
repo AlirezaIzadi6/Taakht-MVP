@@ -156,7 +156,7 @@ What the one-week MVP contains, in more detail in [MVP architecture](docs/archit
 - **Built and running:** the four services with a database each; gRPC between them (`GetAd`, `LockAds`); Kafka events through a transactional outbox with idempotent consumers; the atomic exclusive lock in the Ad service; versioned approvals; the lock saga with a locker-fee deadline and compensation; Envoy with JWT validation and REST transcoding; seeded users and a dev token tool.
 - **Verified by:** unit and integration tests per service and library, `tests/e2e` (happy path, payment timeout, lock race, locker eligibility; run against the live stack), and `scripts/demo.sh` (a recorded run is in the demo walkthrough).
 - **Mocked or cut** (list in the plan): Communication, Reputation, KYC, Report, locker partner (mocked in Swap), pricing, hotspots, TTL expiry, item-condition claims, Elasticsearch, Redis, Logstash.
-- **Not done:** load test results (no throughput or latency numbers exist), fault-injection tests (Kafka or a service down mid-saga), containerized deployment of the services, a real identity provider, service-to-service authentication, repair of stuck `AGREEMENT_PENDING` / `LOCKING` states, DLQ, pruning of outbox tables.
+- **Not done:** load test results (no throughput or latency numbers exist), fault-injection tests (Kafka or a service down mid-saga), containerized deployment of the services, a real identity provider, service-to-service authentication, repair of a swap stuck in `LOCKING`, a replay tool for the `dead_letter` table.
 
 ## Status and known limitations
 

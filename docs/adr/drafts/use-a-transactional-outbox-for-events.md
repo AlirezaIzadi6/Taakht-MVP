@@ -11,7 +11,7 @@ Services change their own database and must tell other services through Kafka. W
 
 ## Decision
 
-We will write every event into an `outbox` table in the same database transaction as the business change, and publish it to Kafka from a polling relay inside the service. Delivery is at-least-once. Rows are inserted with `created_at = clock_timestamp()` so events written in one transaction keep their order, and the relay reads `ORDER BY created_at` with `FOR UPDATE SKIP LOCKED`.
+We will write every event into an `outbox` table in the same database transaction as the business change, and publish it to Kafka from a polling relay inside the service. Delivery is at-least-once. Rows are inserted with `created_at = clock_timestamp()` so events written in one transaction keep their order, and the relay reads `ORDER BY created_at, id` with `FOR UPDATE SKIP LOCKED`.
 
 ## Options considered
 

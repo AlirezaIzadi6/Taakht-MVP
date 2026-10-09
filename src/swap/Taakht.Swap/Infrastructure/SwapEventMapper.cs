@@ -28,6 +28,7 @@ public static class SwapEventMapper
             SwapId = swap.Id.ToString(),
             AdAId = swap.AdAId,
             AdBId = swap.AdBId,
+            NegotiationId = swap.NegotiationId,
         },
         SwapCancelledEvent c => new SwapPb.SwapCancelled
         {
@@ -36,6 +37,7 @@ public static class SwapEventMapper
             AdBId = swap.AdBId,
             Reason = c.Reason,
             DefaultingUserId = c.DefaultingUserId,
+            NegotiationId = swap.NegotiationId,
         },
         _ => throw new ArgumentOutOfRangeException(nameof(ev), ev, "unknown swap event"),
     };

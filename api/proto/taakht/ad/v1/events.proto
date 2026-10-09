@@ -9,26 +9,34 @@ option csharp_namespace = "Taakht.Ad.V1";
 
 // Topic: ad.events. Key: ad id.
 // Published/Edited/Released carry the full snapshot so consumers never call back.
+// Every event carries seq: a per-ad counter incremented on every event of that ad (ad.event_seq),
+// so consumers can ignore an event that is older than one they already applied.
 message AdPublished {
   Ad ad = 1;
+  int64 seq = 2;
 }
 message AdEdited {
   Ad ad = 1;
+  int64 seq = 2;
 }
 message AdHidden {
   string ad_id = 1;
+  int64 seq = 2;
 }
 message AdLocked {
   string ad_id = 1;
   string swap_id = 2;
+  int64 seq = 3;
 }
 message AdReleased {
   string ad_id = 1;
   string swap_id = 2;
   // The ad after release (status is published or hidden).
   Ad ad = 3;
+  int64 seq = 4;
 }
 message AdClosed {
   string ad_id = 1;
   string swap_id = 2;
+  int64 seq = 3;
 }

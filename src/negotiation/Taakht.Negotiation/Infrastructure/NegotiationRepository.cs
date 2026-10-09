@@ -134,6 +134,40 @@ public static class NegotiationRepository
             tx, cancellationToken: ct));
     }
 
+    /// <summary>Remembers the ad versions that went into AgreementReached, so the event can be published again unchanged.</summary>
+    public static async Task SetAgreedVersionsAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, Guid id, int requesterVersion, int targetVersion, CancellationToken ct) =>
+        await conn.ExecuteAsync(new CommandDefinition(
+            "UPDATE negotiation SET agreed_requester_version = @requesterVersion, agreed_target_version = @targetVersion WHERE id = @id",
+            new { id, requesterVersion, targetVersion }, tx, cancellationToken: ct));
+
+    /// <summary>AGREEMENT_PENDING negotiations whose current recovery period (since pending, or since the last republish) ended.</summary>
+    public static async Task<List<Guid>> ListDuePendingAsync(NpgsqlConnection conn, DateTimeOffset cutoff, int limit, CancellationToken ct) =>
+        (await conn.QueryAsync<Guid>(new CommandDefinition(
+            """
+            SELECT id FROM negotiation
+            WHERE status = 'AGREEMENT_PENDING' AND coalesce(last_republished_at, updated_at) <= @cutoff
+            ORDER BY coalesce(last_republished_at, updated_at), id LIMIT @limit
+            """,
+            new { cutoff, limit }, cancellationToken: ct))).ToList();
+
+    /// <summary>Row-locks one due AGREEMENT_PENDING negotiation (skipping rows other sweepers hold) and returns its recovery state.</summary>
+    public static async Task<PendingState?> LockDuePendingAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx, Guid id, DateTimeOffset cutoff, CancellationToken ct) =>
+        await conn.QuerySingleOrDefaultAsync<PendingState>(new CommandDefinition(
+            """
+            SELECT republish_count AS RepublishCount, agreed_requester_version AS RequesterVersion, agreed_target_version AS TargetVersion
+            FROM negotiation
+            WHERE id = @id AND status = 'AGREEMENT_PENDING' AND coalesce(last_republished_at, updated_at) <= @cutoff
+            FOR UPDATE SKIP LOCKED
+            """,
+            new { id, cutoff }, tx, cancellationToken: ct));
+
+    public static async Task MarkRepublishedAsync(NpgsqlConnection conn, NpgsqlTransaction tx, Guid id, DateTimeOffset now, CancellationToken ct) =>
+        await conn.ExecuteAsync(new CommandDefinition(
+            "UPDATE negotiation SET republish_count = republish_count + 1, last_republished_at = @now WHERE id = @id",
+            new { id, now }, tx, cancellationToken: ct));
+
     /// <summary>Locks the ad_ref rows in a fixed order so concurrent openers serialize without deadlocking.</summary>
     public static async Task LockAdRefsAsync(NpgsqlConnection conn, NpgsqlTransaction tx, IReadOnlyCollection<string> adIds, CancellationToken ct)
     {
@@ -276,6 +310,9 @@ public static class NegotiationRepository
     private static ApprovalKind KindFromDb(string v) => v == "AD" ? ApprovalKind.Ad : ApprovalKind.Terms;
 
     private static DateTimeOffset AsUtc(DateTime value) => new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
+
+    /// <summary>Recovery bookkeeping of an AGREEMENT_PENDING negotiation (versions are null for rows from before the migration).</summary>
+    public sealed record PendingState(int RepublishCount, int? RequesterVersion, int? TargetVersion);
 
     private sealed class NegotiationRow
     {

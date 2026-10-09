@@ -102,6 +102,13 @@ func TestPaymentTimeout(t *testing.T) {
 	u3.WaitMatch(observer.GetId(), adA.GetId())
 
 	n := u2.Open(adB.GetId(), adA.GetId())
+	// Both parties see both ads on the negotiation.
+	if n.GetRequesterAd().GetId() != adB.GetId() || n.GetTargetAd().GetId() != adA.GetId() {
+		t.Fatalf("negotiation did not carry both ads: requester_ad=%v target_ad=%v", n.GetRequesterAd().GetId(), n.GetTargetAd().GetId())
+	}
+	if got := u1.Negotiation(n.GetId()); got.GetRequesterAd().GetSpec().GetTitle() != adB.GetSpec().GetTitle() {
+		t.Fatalf("counterpart ad missing for the target owner: %v", got.GetRequesterAd())
+	}
 	u1.ApproveAd(n.GetId(), adB.GetVersion())
 	u1.Revise(n.GetId(), 1, harness.Terms(harness.Locker, harness.Locker))
 	u2.ApproveProposal(n.GetId(), 2)
@@ -120,6 +127,8 @@ func TestPaymentTimeout(t *testing.T) {
 	u2.WaitAdStatus(adB.GetId(), adv1.AdStatus_AD_STATUS_PUBLISHED)
 	u3.WaitMatch(observer.GetId(), adA.GetId())
 	u3.WaitMatch(observerB.GetId(), adB.GetId())
+	// SwapCancelled names the negotiation, which becomes CANCELLED.
+	u1.WaitNegotiation(n.GetId(), negotiationv1.NegotiationStatus_NEGOTIATION_STATUS_CANCELLED)
 }
 
 // Two negotiations on the same ad both reach full agreement at the same moment: exactly one lock wins.

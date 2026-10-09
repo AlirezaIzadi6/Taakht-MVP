@@ -14,6 +14,29 @@ public class DurationParserTests
         Assert.Equal(TimeSpan.FromSeconds(seconds), DurationParser.Parse(text));
 
     [Theory]
+    [InlineData("0s")]
+    [InlineData("0ms")]
+    [InlineData("721h")]
+    [InlineData("31d")]
+    [InlineData("99999999999999999999h")]
+    [InlineData("1e9h")]
+    public void ParseBounded_rejects_out_of_range_and_overflowing_values(string text)
+    {
+        var ex = Assert.ThrowsAny<Exception>(() => DurationParser.ParseBounded(
+            "PAYMENT_DEADLINE", text, TimeSpan.FromMilliseconds(1), TimeSpan.FromDays(30)));
+        Assert.Contains("PAYMENT_DEADLINE", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("5s", 5)]
+    [InlineData("1h", 3600)]
+    [InlineData("720h", 720 * 3600)]
+    public void ParseBounded_accepts_values_in_range(string text, int seconds) =>
+        Assert.Equal(
+            TimeSpan.FromSeconds(seconds),
+            DurationParser.ParseBounded("PAYMENT_DEADLINE", text, TimeSpan.FromMilliseconds(1), TimeSpan.FromDays(30)));
+
+    [Theory]
     [InlineData("")]
     [InlineData("abc")]
     [InlineData("10")]

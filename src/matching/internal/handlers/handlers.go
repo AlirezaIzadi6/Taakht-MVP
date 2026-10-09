@@ -41,9 +41,9 @@ func (h *Handlers) Map() map[string]Handler {
 		"taakht.ad.v1.AdPublished": onSnapshot[adv1.AdPublished](h),
 		"taakht.ad.v1.AdEdited":    onSnapshot[adv1.AdEdited](h),
 		"taakht.ad.v1.AdReleased":  onSnapshot[adv1.AdReleased](h),
-		"taakht.ad.v1.AdHidden":    onRemove[adv1.AdHidden](),
-		"taakht.ad.v1.AdLocked":    onRemove[adv1.AdLocked](),
-		"taakht.ad.v1.AdClosed":    onRemove[adv1.AdClosed](),
+		"taakht.ad.v1.AdHidden":    onRemove[adv1.AdHidden](h),
+		"taakht.ad.v1.AdLocked":    onRemove[adv1.AdLocked](h),
+		"taakht.ad.v1.AdClosed":    onRemove[adv1.AdClosed](h),
 	}
 }
 
@@ -52,13 +52,14 @@ func onSnapshot[T any, P interface {
 	*T
 	proto.Message
 	GetAd() *adv1.Ad
+	GetSeq() int64
 }](h *Handlers) Handler {
 	return func(ctx context.Context, tx pgx.Tx, env *commonv1.Envelope) error {
 		msg := P(new(T))
 		if err := consume.Decode(env, msg); err != nil {
 			return err
 		}
-		return h.ApplySnapshot(ctx, tx, msg.GetAd())
+		return h.ApplySnapshot(ctx, tx, msg.GetAd(), msg.GetSeq())
 	}
 }
 
@@ -67,30 +68,37 @@ func onRemove[T any, P interface {
 	*T
 	proto.Message
 	GetAdId() string
-}]() Handler {
+	GetSeq() int64
+}](h *Handlers) Handler {
 	return func(ctx context.Context, tx pgx.Tx, env *commonv1.Envelope) error {
 		msg := P(new(T))
 		if err := consume.Decode(env, msg); err != nil {
 			return err
 		}
-		return index.Delete(ctx, tx, msg.GetAdId())
+		applied, err := index.Remove(ctx, tx, msg.GetAdId(), msg.GetSeq())
+		if err == nil && !applied {
+			h.Log.Info("ignored stale removal event", "ad_id", msg.GetAdId(), "seq", msg.GetSeq())
+		}
+		return err
 	}
 }
 
-// ApplySnapshot indexes a published snapshot (and matches it) or removes a non-published one.
-func (h *Handlers) ApplySnapshot(ctx context.Context, tx pgx.Tx, ad *adv1.Ad) error {
+// ApplySnapshot indexes a published snapshot (and matches it) or removes a non-published one. seq is the
+// event's per-ad sequence number (0 for events written before it existed).
+func (h *Handlers) ApplySnapshot(ctx context.Context, tx pgx.Tx, ad *adv1.Ad, seq int64) error {
 	if ad == nil || ad.GetId() == "" {
 		return consume.Permanent(fmt.Errorf("event without ad snapshot"))
 	}
 	if ad.GetStatus() != adv1.AdStatus_AD_STATUS_PUBLISHED {
-		return index.Delete(ctx, tx, ad.GetId())
+		_, err := index.Remove(ctx, tx, ad.GetId(), seq)
+		return err
 	}
-	applied, err := index.Upsert(ctx, tx, ad)
+	applied, err := index.Upsert(ctx, tx, ad, seq)
 	if err != nil {
 		return err
 	}
 	if !applied {
-		h.Log.Info("ignored stale ad event", "ad_id", ad.GetId(), "version", ad.GetVersion())
+		h.Log.Info("ignored stale ad event", "ad_id", ad.GetId(), "version", ad.GetVersion(), "seq", seq)
 		return nil
 	}
 	return h.notifyMatches(ctx, tx, ad)

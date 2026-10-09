@@ -155,6 +155,7 @@ type SwapCompleted struct {
 	SwapId        string                 `protobuf:"bytes,1,opt,name=swap_id,json=swapId,proto3" json:"swap_id,omitempty"`
 	AdAId         string                 `protobuf:"bytes,2,opt,name=ad_a_id,json=adAId,proto3" json:"ad_a_id,omitempty"`
 	AdBId         string                 `protobuf:"bytes,3,opt,name=ad_b_id,json=adBId,proto3" json:"ad_b_id,omitempty"`
+	NegotiationId string                 `protobuf:"bytes,4,opt,name=negotiation_id,json=negotiationId,proto3" json:"negotiation_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -210,6 +211,13 @@ func (x *SwapCompleted) GetAdBId() string {
 	return ""
 }
 
+func (x *SwapCompleted) GetNegotiationId() string {
+	if x != nil {
+		return x.NegotiationId
+	}
+	return ""
+}
+
 type SwapCancelled struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	SwapId string                 `protobuf:"bytes,1,opt,name=swap_id,json=swapId,proto3" json:"swap_id,omitempty"`
@@ -218,6 +226,7 @@ type SwapCancelled struct {
 	Reason string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
 	// Set when a party failed to pay in time (feeds Reputation later).
 	DefaultingUserId string `protobuf:"bytes,5,opt,name=defaulting_user_id,json=defaultingUserId,proto3" json:"defaulting_user_id,omitempty"`
+	NegotiationId    string `protobuf:"bytes,6,opt,name=negotiation_id,json=negotiationId,proto3" json:"negotiation_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -287,6 +296,13 @@ func (x *SwapCancelled) GetDefaultingUserId() string {
 	return ""
 }
 
+func (x *SwapCancelled) GetNegotiationId() string {
+	if x != nil {
+		return x.NegotiationId
+	}
+	return ""
+}
+
 var File_taakht_swap_v1_events_proto protoreflect.FileDescriptor
 
 const file_taakht_swap_v1_events_proto_rawDesc = "" +
@@ -300,17 +316,19 @@ const file_taakht_swap_v1_events_proto_rawDesc = "" +
 	"\fSwapRejected\x12\x17\n" +
 	"\aswap_id\x18\x01 \x01(\tR\x06swapId\x12%\n" +
 	"\x0enegotiation_id\x18\x02 \x01(\tR\rnegotiationId\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason\"X\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"\x7f\n" +
 	"\rSwapCompleted\x12\x17\n" +
 	"\aswap_id\x18\x01 \x01(\tR\x06swapId\x12\x16\n" +
 	"\aad_a_id\x18\x02 \x01(\tR\x05adAId\x12\x16\n" +
-	"\aad_b_id\x18\x03 \x01(\tR\x05adBId\"\x9e\x01\n" +
+	"\aad_b_id\x18\x03 \x01(\tR\x05adBId\x12%\n" +
+	"\x0enegotiation_id\x18\x04 \x01(\tR\rnegotiationId\"\xc5\x01\n" +
 	"\rSwapCancelled\x12\x17\n" +
 	"\aswap_id\x18\x01 \x01(\tR\x06swapId\x12\x16\n" +
 	"\aad_a_id\x18\x02 \x01(\tR\x05adAId\x12\x16\n" +
 	"\aad_b_id\x18\x03 \x01(\tR\x05adBId\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\x12,\n" +
-	"\x12defaulting_user_id\x18\x05 \x01(\tR\x10defaultingUserIdBEZ2github.com/taakht/taakht/gen/taakht/swap/v1;swapv1\xaa\x02\x0eTaakht.Swap.V1b\x06proto3"
+	"\x12defaulting_user_id\x18\x05 \x01(\tR\x10defaultingUserId\x12%\n" +
+	"\x0enegotiation_id\x18\x06 \x01(\tR\rnegotiationIdBEZ2github.com/taakht/taakht/gen/taakht/swap/v1;swapv1\xaa\x02\x0eTaakht.Swap.V1b\x06proto3"
 
 var (
 	file_taakht_swap_v1_events_proto_rawDescOnce sync.Once

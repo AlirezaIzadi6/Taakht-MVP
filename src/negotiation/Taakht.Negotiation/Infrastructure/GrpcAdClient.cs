@@ -16,14 +16,22 @@ public sealed class GrpcAdClient(AdService.AdServiceClient client) : IAdClient
 {
     public async Task<DomainSnapshot?> GetAdAsync(string adId, CancellationToken ct)
     {
+        var ad = await FetchAsync(adId, TimeSpan.FromSeconds(5), ct);
+        return ad is null ? null : new DomainSnapshot(ad.Id, ad.OwnerId, ad.Version, Map(ad.Status));
+    }
+
+    public Task<Taakht.Ad.V1.Ad?> GetAdDetailsAsync(string adId, CancellationToken ct) =>
+        FetchAsync(adId, TimeSpan.FromSeconds(3), ct);
+
+    private async Task<Taakht.Ad.V1.Ad?> FetchAsync(string adId, TimeSpan timeout, CancellationToken ct)
+    {
         try
         {
-            var ad = await client.GetAdAsync(
+            return await client.GetAdAsync(
                 new GetAdRequest { AdId = adId },
                 headers: new Metadata { { IdentityConstants.UserIdHeader, SystemIdentities.Negotiation } },
-                deadline: DateTime.UtcNow.AddSeconds(5),
+                deadline: DateTime.UtcNow.Add(timeout),
                 cancellationToken: ct);
-            return new DomainSnapshot(ad.Id, ad.OwnerId, ad.Version, Map(ad.Status));
         }
         catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
         {

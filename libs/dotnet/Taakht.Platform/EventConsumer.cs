@@ -9,7 +9,7 @@ namespace Taakht.Platform;
 
 /// <summary>
 /// Thrown by a handler for an event that can never succeed (rejected input, undecodable payload). The consumer
-/// logs it, records the event as processed, commits the offset and moves on instead of retrying forever.
+/// logs it, records the event as processed (and in dead_letter), commits the offset and moves on instead of retrying forever.
 /// </summary>
 public sealed class PermanentEventException : Exception
 {
@@ -30,8 +30,9 @@ public sealed class PermanentEventException : Exception
 
 /// <summary>
 /// Kafka consumer: the processed_events dedupe row and the handler's writes share one transaction and the
-/// offset is committed after it. Unknown envelope types are skipped. Failed handlers are retried with backoff
-/// (blocking their partition) unless they throw <see cref="PermanentEventException"/> or the payload cannot be decoded.
+/// offset is committed after it. Unknown envelope types are skipped (a handled type with an unreadable event id is logged at error level). Failed handlers are retried with backoff
+/// (blocking their partition) unless they throw <see cref="PermanentEventException"/> or the payload cannot be decoded;
+/// those events are stored in dead_letter.
 /// </summary>
 public sealed class EventConsumer(
     NpgsqlDataSource dataSource,
@@ -135,7 +136,7 @@ public sealed class EventConsumer(
                 catch (PermanentEventException ex)
                 {
                     logger.LogError(ex, "Permanent handler failure at {Position}; skipping the event", position);
-                    await MarkProcessedAsync(value, ct);
+                    await RecordSkippedAsync(value, position.Topic, ex.Message, ct);
                 }
 
                 return true;
@@ -163,30 +164,48 @@ public sealed class EventConsumer(
         return false;
     }
 
-    /// <summary>Records the event as handled without running its handler (used for permanent failures).</summary>
-    private async Task MarkProcessedAsync(byte[] value, CancellationToken ct)
+    /// <summary>
+    /// Records a permanently failed event as processed and keeps its envelope and the error in dead_letter,
+    /// in one statement so both rows exist or neither does.
+    /// </summary>
+    private async Task RecordSkippedAsync(byte[] value, string topic, string error, CancellationToken ct)
     {
         Envelope env;
         try
         {
             env = Envelope.Parser.ParseFrom(value);
         }
-        catch (InvalidProtocolBufferException)
+        catch (InvalidProtocolBufferException ex)
         {
+            logger.LogError(ex, "Skipped message is not a readable envelope; it cannot be recorded");
             return;
         }
 
         if (!Guid.TryParse(env.EventId, out var eventId))
         {
+            logger.LogError("Skipped {Type} event has no valid event id ({EventId}); it cannot be recorded", env.Type, env.EventId);
             return;
         }
 
         await using var cmd = dataSource.CreateCommand(
-            "INSERT INTO processed_events (consumer, event_id) VALUES (@c, @e) ON CONFLICT DO NOTHING");
+            """
+            WITH p AS (
+              INSERT INTO processed_events (consumer, event_id) VALUES (@c, @e) ON CONFLICT DO NOTHING
+            )
+            INSERT INTO dead_letter (consumer, event_id, topic, payload, error) VALUES (@c, @e, @t, @p, @err)
+            ON CONFLICT DO NOTHING
+            """);
         cmd.Parameters.AddWithValue("c", group);
         cmd.Parameters.AddWithValue("e", eventId);
+        cmd.Parameters.AddWithValue("t", topic);
+        cmd.Parameters.AddWithValue("p", value);
+        cmd.Parameters.AddWithValue("err", error);
         await cmd.ExecuteNonQueryAsync(ct);
     }
+
+    /// <summary>The permanent-skip statement on its own, for tests.</summary>
+    public Task SkipPermanentlyAsync(byte[] value, string topic, string error, CancellationToken ct = default)
+        => RecordSkippedAsync(value, topic, error, ct);
 
     /// <summary>Processes one message value in a single transaction. Public for tests.</summary>
     public async Task ProcessAsync(byte[] value, CancellationToken ct = default)
@@ -198,12 +217,19 @@ public sealed class EventConsumer(
         }
         catch (InvalidProtocolBufferException ex)
         {
-            logger.LogWarning(ex, "Skipping undecodable message");
+            logger.LogError(ex, "Skipping undecodable message");
             return;
         }
 
-        if (!handlers.TryGetValue(env.Type, out var handler) || !Guid.TryParse(env.EventId, out var eventId))
+        if (!handlers.TryGetValue(env.Type, out var handler))
         {
+            // Unknown types are expected: a consumer ignores what it does not handle.
+            return;
+        }
+
+        if (!Guid.TryParse(env.EventId, out var eventId))
+        {
+            logger.LogError("Skipping {Type} event with invalid event id '{EventId}'", env.Type, env.EventId);
             return;
         }
 

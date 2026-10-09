@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -422,5 +425,112 @@ func TestUndecodableSwapEventIsPermanent(t *testing.T) {
 			t.Fatalf("%s: err = %v, want permanent", typ, err)
 		}
 		env.EventId = uuid.NewString()
+	}
+}
+
+// eventSeqs returns the seq of every ad event written for adID, in outbox order.
+func eventSeqs(t *testing.T, pool *pgxpool.Pool, adID string) []int64 {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `SELECT envelope FROM outbox WHERE key = $1 ORDER BY created_at, id`, adID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		env := &commonv1.Envelope{}
+		if err := proto.Unmarshal(raw, env); err != nil {
+			t.Fatal(err)
+		}
+		mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(env.Type))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := mt.New().Interface()
+		if err := proto.Unmarshal(env.Payload, m); err != nil {
+			t.Fatal(err)
+		}
+		f := m.ProtoReflect().Descriptor().Fields().ByName("seq")
+		if f == nil {
+			t.Fatalf("%s has no seq field", env.Type)
+		}
+		out = append(out, m.ProtoReflect().Get(f).Int())
+	}
+	return out
+}
+
+func TestEventSeqIncreasesPerAd(t *testing.T) {
+	s, pool := newTestService(t)
+	ctx := context.Background()
+	a := mustCreate(t, s, "user-1", "a")
+	b := mustCreate(t, s, "user-2", "b")
+	publish(t, s, a)                                                                                                         // 1
+	if _, err := s.EditAd(as("user-1"), &adv1.EditAdRequest{AdId: a.Id, ExpectedVersion: 1, Spec: spec("v2")}); err != nil { // 2
+		t.Fatal(err)
+	}
+	if _, err := s.LockAds(as(identity.SystemSwap), lockReq("sw-seq", a, b, 2, 1)); err != nil { // 3 (a), 1 (b)
+		t.Fatal(err)
+	}
+	cancelled := envelopeOf(t, &swapv1.SwapCancelled{SwapId: "sw-seq", AdAId: a.Id, AdBId: b.Id})
+	if err := consume.Process(ctx, pool, Group, cancelled, Handlers()["taakht.swap.v1.SwapCancelled"]); err != nil { // 4 (a), 2 (b)
+		t.Fatal(err)
+	}
+	if got := eventSeqs(t, pool, a.Id); !slices.Equal(got, []int64{1, 2, 3, 4}) {
+		t.Fatalf("ad a seqs = %v", got)
+	}
+	if got := eventSeqs(t, pool, b.Id); !slices.Equal(got, []int64{1, 2}) {
+		t.Fatalf("ad b seqs = %v", got)
+	}
+}
+
+func TestEditAdWithUnchangedSpecIsNoOp(t *testing.T) {
+	s, pool := newTestService(t)
+	a := mustCreate(t, s, "user-1", "a")
+	publish(t, s, a)
+	before := countEvents(t, pool, "taakht.ad.v1.AdEdited")
+
+	// Same content, differently spelled (padding in the title, duplicate want entries): still no change.
+	same := spec("a")
+	same.Title = "  a "
+	same.WantCategories = []string{"tools", "tools"}
+	got, err := s.EditAd(as("user-1"), &adv1.EditAdRequest{AdId: a.Id, ExpectedVersion: 1, Spec: same})
+	if err != nil || got.Version != 1 {
+		t.Fatalf("no-op edit = %v, %v", got, err)
+	}
+	if n := countEvents(t, pool, "taakht.ad.v1.AdEdited"); n != before {
+		t.Fatalf("AdEdited events %d -> %d", before, n)
+	}
+	cur, _ := s.GetAd(as("user-1"), &adv1.GetAdRequest{AdId: a.Id})
+	if cur.Version != 1 {
+		t.Fatalf("version = %d", cur.Version)
+	}
+
+	// A stale expected_version still aborts even when the spec is unchanged.
+	_, err = s.EditAd(as("user-1"), &adv1.EditAdRequest{AdId: a.Id, ExpectedVersion: 7, Spec: spec("a")})
+	wantCode(t, err, codes.Aborted)
+
+	// A real change still bumps the version and emits.
+	ed, err := s.EditAd(as("user-1"), &adv1.EditAdRequest{AdId: a.Id, ExpectedVersion: 1, Spec: spec("changed")})
+	if err != nil || ed.Version != 2 {
+		t.Fatalf("edit = %v, %v", ed, err)
+	}
+	if n := countEvents(t, pool, "taakht.ad.v1.AdEdited"); n != before+1 {
+		t.Fatalf("AdEdited events = %d", n)
+	}
+}
+
+func TestGetAdMissingAndInvisibleAreIndistinguishable(t *testing.T) {
+	s, _ := newTestService(t)
+	hidden := mustCreate(t, s, "user-1", "hidden")
+	_, errMissing := s.GetAd(as("user-2"), &adv1.GetAdRequest{AdId: uuid.NewString()})
+	_, errHidden := s.GetAd(as("user-2"), &adv1.GetAdRequest{AdId: hidden.Id})
+	wantCode(t, errMissing, codes.NotFound)
+	wantCode(t, errHidden, codes.NotFound)
+	if errMissing.Error() != errHidden.Error() {
+		t.Fatalf("messages differ: %q vs %q", errMissing, errHidden)
 	}
 }

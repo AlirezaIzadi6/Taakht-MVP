@@ -62,7 +62,7 @@ public sealed class OutboxRelay(
 
         var rows = new List<(Guid Id, string Topic, string Key, byte[] Envelope)>();
         await using (var cmd = new NpgsqlCommand(
-            "SELECT id, topic, key, envelope FROM outbox WHERE published_at IS NULL ORDER BY created_at LIMIT @n FOR UPDATE SKIP LOCKED",
+            "SELECT id, topic, key, envelope FROM outbox WHERE published_at IS NULL ORDER BY created_at, id LIMIT @n FOR UPDATE SKIP LOCKED",
             conn, tx))
         {
             cmd.Parameters.AddWithValue("n", _batchSize);

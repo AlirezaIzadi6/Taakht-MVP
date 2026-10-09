@@ -21,7 +21,10 @@ CREATE TABLE outbox (
   created_at timestamptz NOT NULL DEFAULT now(), published_at timestamptz);
 CREATE TABLE processed_events (
   consumer text NOT NULL, event_id uuid NOT NULL, processed_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (consumer, event_id));`
+  PRIMARY KEY (consumer, event_id));
+CREATE TABLE dead_letter (
+  consumer text NOT NULL, event_id uuid NOT NULL, topic text NOT NULL, payload bytea NOT NULL, error text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (consumer, event_id));`
 
 func TestParseDuration(t *testing.T) {
 	cases := map[string]time.Duration{
@@ -37,7 +40,7 @@ func TestParseDuration(t *testing.T) {
 			t.Errorf("ParseDuration(%q) = %v, %v; want %v", in, got, err, want)
 		}
 	}
-	for _, in := range []string{"", "d", "abc", "7x", "1dfoo"} {
+	for _, in := range []string{"", "d", "abc", "7x", "1dfoo", "99999999d", "99999999999999999999d"} {
 		if _, err := housekeeping.ParseDuration(in); err == nil {
 			t.Errorf("ParseDuration(%q) succeeded, want error", in)
 		}
@@ -47,23 +50,32 @@ func TestParseDuration(t *testing.T) {
 func TestOptionsFromEnv(t *testing.T) {
 	t.Setenv(housekeeping.EnvOutboxRetention, "")
 	t.Setenv(housekeeping.EnvProcessedRetention, "")
+	t.Setenv(housekeeping.EnvDeadLetterRetention, "")
 	t.Setenv(housekeeping.EnvInterval, "")
 	o, err := housekeeping.OptionsFromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.OutboxRetention != 24*time.Hour || o.ProcessedRetention != 7*24*time.Hour || o.Interval != 10*time.Minute {
+	if o.OutboxRetention != 24*time.Hour || o.ProcessedRetention != 7*24*time.Hour || o.Interval != 10*time.Minute ||
+		o.DeadLetterRetention != 30*24*time.Hour {
 		t.Fatalf("defaults wrong: %+v", o)
 	}
 
 	t.Setenv(housekeeping.EnvOutboxRetention, "2d")
 	t.Setenv(housekeeping.EnvProcessedRetention, "30d")
 	t.Setenv(housekeeping.EnvInterval, "5m")
+	t.Setenv(housekeeping.EnvDeadLetterRetention, "3d")
 	o, err = housekeeping.OptionsFromEnv()
-	if err != nil || o.OutboxRetention != 48*time.Hour || o.ProcessedRetention != 30*24*time.Hour || o.Interval != 5*time.Minute {
+	if err != nil || o.DeadLetterRetention != 72*time.Hour || o.OutboxRetention != 48*time.Hour || o.ProcessedRetention != 30*24*time.Hour || o.Interval != 5*time.Minute {
 		t.Fatalf("env not applied: %+v %v", o, err)
 	}
 
+	t.Setenv(housekeeping.EnvInterval, "5m")
+	t.Setenv(housekeeping.EnvDeadLetterRetention, "30s")
+	if _, err := housekeeping.OptionsFromEnv(); err == nil {
+		t.Error("DEAD_LETTER_RETENTION=30s accepted")
+	}
+	t.Setenv(housekeeping.EnvDeadLetterRetention, "")
 	for _, bad := range []string{"30s", "nope", "-1h"} {
 		t.Setenv(housekeeping.EnvInterval, bad)
 		if _, err := housekeeping.OptionsFromEnv(); err == nil {
@@ -97,27 +109,32 @@ SELECT gen_random_uuid(), 't', 'k', '\x00', now() FROM generate_series(1, 5);
 INSERT INTO processed_events (consumer, event_id, processed_at)
 SELECT 'c', gen_random_uuid(), now() - interval '10 days' FROM generate_series(1, 12);
 INSERT INTO processed_events (consumer, event_id, processed_at)
-SELECT 'c', gen_random_uuid(), now() - interval '1 day' FROM generate_series(1, 4);`); err != nil {
+SELECT 'c', gen_random_uuid(), now() - interval '1 day' FROM generate_series(1, 4);
+INSERT INTO dead_letter (consumer, event_id, topic, payload, error, created_at)
+SELECT 'c', gen_random_uuid(), 't', '\x00', 'boom', now() - interval '40 days' FROM generate_series(1, 3);
+INSERT INTO dead_letter (consumer, event_id, topic, payload, error)
+SELECT 'c', gen_random_uuid(), 't', '\x00', 'boom' FROM generate_series(1, 2);`); err != nil {
 		t.Fatal(err)
 	}
 
 	// Batch size 10 forces several statements (25 -> 10+10+5, 12 -> 10+2).
 	opts := housekeeping.Options{BatchSize: 10}
-	o, p, err := housekeeping.PruneOnce(ctx, pool, opts)
+	o, p, dl, err := housekeeping.PruneOnce(ctx, pool, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o != 25 || p != 12 {
-		t.Fatalf("deleted outbox=%d processed=%d, want 25 and 12", o, p)
+	if o != 25 || p != 12 || dl != 3 {
+		t.Fatalf("deleted outbox=%d processed=%d dead_letter=%d, want 25, 12 and 3", o, p, dl)
 	}
 	assertCount(ctx, t, pool, `SELECT count(*) FROM outbox WHERE published_at IS NOT NULL`, 5)
 	assertCount(ctx, t, pool, `SELECT count(*) FROM outbox WHERE published_at IS NULL`, 10)
 	assertCount(ctx, t, pool, `SELECT count(*) FROM processed_events`, 4)
+	assertCount(ctx, t, pool, `SELECT count(*) FROM dead_letter`, 2)
 
 	// A second sweep has nothing to do.
-	o, p, err = housekeeping.PruneOnce(ctx, pool, opts)
-	if err != nil || o != 0 || p != 0 {
-		t.Fatalf("second sweep = %d, %d, %v", o, p, err)
+	o, p, dl, err = housekeeping.PruneOnce(ctx, pool, opts)
+	if err != nil || o != 0 || p != 0 || dl != 0 {
+		t.Fatalf("second sweep = %d, %d, %d, %v", o, p, dl, err)
 	}
 }
 

@@ -28,7 +28,7 @@ Services run on the host (`go run`, `dotnet run`), not in containers, during the
 
 gRPC reflection is off unless `TAAKHT_GRPC_REFLECTION=on` (Go) or the Development environment (.NET); `scripts/dev.sh` turns it on. Dev-only RPCs need `ENABLE_DEV_ENDPOINTS=true` or Development.
 
-Environment variables (with these defaults for local runs): `DATABASE_URL=postgres://taakht:taakht@localhost:5432/<db>?sslmode=disable` (the .NET services convert it to a connection string or use `ConnectionStrings__Default`), `KAFKA_BROKERS=localhost:9094`, `GRPC_ADDR=:<port>`, `AD_ADDR=localhost:9001`, `ELIGIBILITY_FILE=../../config/eligibility.json` (resolve relative to the working directory; also accept an absolute path). Swap only: `PAYMENT_DEADLINE=2m` (a Go-style duration for readability; parse `1h`, `2m`, `30s`).
+Environment variables (with these defaults for local runs): `DATABASE_URL=postgres://taakht:taakht@localhost:5432/<db>?sslmode=disable` (the .NET services convert it to a connection string or use `ConnectionStrings__Default`), `KAFKA_BROKERS=localhost:9094`, `GRPC_ADDR=:<port>`, `AD_ADDR=localhost:9001`, `ELIGIBILITY_FILE=../../config/eligibility.json` (resolve relative to the working directory; also accept an absolute path). Swap only: `PAYMENT_DEADLINE=2m` (a Go-style duration for readability; parse `1h`, `2m`, `30s`; startup fails unless it is greater than zero and at most `30d`, and absurdly large values are rejected before they can overflow). Negotiation only: `AGREEMENT_PENDING_TIMEOUT=10m` (how long a negotiation may wait in `AGREEMENT_PENDING` before each recovery step of the sweeper, see the architecture document; durations accept the `d` suffix; startup fails below `10s` or above `30d`), `NEGOTIATION_CAP=10`.
 
 ## Identity
 
@@ -66,7 +66,7 @@ CREATE TABLE outbox (
 CREATE INDEX outbox_unpublished ON outbox (created_at) WHERE published_at IS NULL;
 ```
 
-A relay loop (poll every ~200 ms) reads unpublished rows in `created_at` order with `FOR UPDATE SKIP LOCKED`, produces to Kafka, waits for the ack, then sets `published_at`. Delivery is at-least-once. Insert with `created_at = clock_timestamp()` (not the `now()` default, which is the transaction start and would leave events of one transaction unordered).
+A relay loop (poll every ~200 ms) reads unpublished rows in `created_at, id` order with `FOR UPDATE SKIP LOCKED`, produces to Kafka, waits for the ack, then sets `published_at`. Delivery is at-least-once. Insert with `created_at = clock_timestamp()` (not the `now()` default, which is the transaction start and would leave events of one transaction unordered).
 
 **Idempotent consumers** (every consuming service has this table; the dedupe insert and the handler's writes share one transaction, and the offset is committed after the transaction):
 
@@ -79,19 +79,36 @@ CREATE TABLE processed_events (
 );
 ```
 
-If `INSERT ... ON CONFLICT DO NOTHING` inserts nothing, the event was already handled: skip. A handler that fails returns an error; the message is retried (log + retry with backoff; no DLQ in the MVP). An error that retrying cannot fix is wrapped as permanent (`consume.Permanent` in Go, `PermanentEventException` in .NET; decode failures are permanent automatically): the event is logged, recorded in `processed_events` and skipped. Handlers must also be safe against re-ordering across topics (check state, not just event arrival).
+If `INSERT ... ON CONFLICT DO NOTHING` inserts nothing, the event was already handled: skip. A handler that fails returns an error; the message is retried (log + retry with backoff). An error that retrying cannot fix is wrapped as permanent (`consume.Permanent` in Go, `PermanentEventException` in .NET; decode failures are permanent automatically): the event is logged at error level, recorded in `processed_events` and stored in `dead_letter` (see below), and skipped. Handlers must also be safe against re-ordering across topics (check state, not just event arrival).
+
+**Dead letters** (every consuming service has this table too, created by a migration):
+
+```sql
+CREATE TABLE dead_letter (
+  consumer   text        NOT NULL,
+  event_id   uuid        NOT NULL,
+  topic      text        NOT NULL,
+  payload    bytea       NOT NULL,        -- the serialized Envelope
+  error      text        NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (consumer, event_id)
+);
+```
+
+The permanent-skip path inserts the `processed_events` row and the `dead_letter` row in one statement. An event whose id is not a UUID cannot be keyed and is only logged. There is no replay tool: an operator decodes `payload` (an `Envelope`) and re-applies it by hand.
 
 Consumer groups are named after the service (`ad`, `matching`, `negotiation`, `swap`); start from the earliest offset.
 
-**Housekeeping.** `outbox` and `processed_events` are pruned by a background job every service runs (Go: `housekeeping.Run` in `libs/goplatform/housekeeping`, wired in `main.go`; .NET: `AddTaakhtHousekeeping()`, a `BackgroundService`). It runs once about 30 s after startup and then every `PRUNE_INTERVAL`, deletes in batches of 1000 rows per statement until nothing is left, logs at info only when it deleted something, and never deletes unpublished outbox rows. Each service ships a `00N_housekeeping_indexes.sql` migration with the supporting indexes.
+**Housekeeping.** `outbox`, `processed_events` and `dead_letter` are pruned by a background job every service runs (Go: `housekeeping.Run` in `libs/goplatform/housekeeping`, wired in `main.go`; .NET: `AddTaakhtHousekeeping()`, a `BackgroundService`). It runs once about 30 s after startup and then every `PRUNE_INTERVAL`, deletes in batches of 1000 rows per statement until nothing is left, logs at info only when it deleted something, and never deletes unpublished outbox rows. Each service ships a `00N_housekeeping_indexes.sql` migration with the supporting indexes.
 
 | Env var | Default | Meaning |
 |---|---|---|
 | `OUTBOX_RETENTION` | `24h` | Published outbox rows older than this (by `published_at`) are deleted. |
 | `PROCESSED_EVENTS_RETENTION` | `7d` | `processed_events` rows older than this (by `processed_at`) are deleted. |
+| `DEAD_LETTER_RETENTION` | `30d` | `dead_letter` rows older than this (by `created_at`) are deleted. |
 | `PRUNE_INTERVAL` | `10m` | Time between sweeps. |
 
-Durations accept the usual units (`90s`, `10m`, `24h`) and a `d` suffix (`7d`, `1d12h`); anything below `1m` or unparseable fails startup. Tradeoff: deleting a `processed_events` row ends the idempotency guarantee for that event, so a redelivery after the retention would run the handler again. Keep `PROCESSED_EVENTS_RETENTION` much larger than any realistic redelivery window (Kafka topic retention, consumer-group offset resets, manual replays); lowering it saves space at the cost of weaker deduplication.
+Durations accept the usual units (`90s`, `10m`, `24h`) and a `d` suffix (`7d`, `1d12h`); anything below `1m`, unparseable or implausibly large (more than 36500 days) fails startup. Tradeoff: deleting a `processed_events` row ends the idempotency guarantee for that event, so a redelivery after the retention would run the handler again. Keep `PROCESSED_EVENTS_RETENTION` much larger than any realistic redelivery window (Kafka topic retention, consumer-group offset resets, manual replays); lowering it saves space at the cost of weaker deduplication.
 
 ## Shared helper API
 

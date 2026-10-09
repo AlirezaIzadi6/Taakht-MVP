@@ -23,7 +23,7 @@ func put(t *testing.T, svc *service.Service, owner, have string, nbh []string, w
 	_, err := index.Upsert(context.Background(), svc.DB, &adv1.Ad{
 		Id: id, OwnerId: owner, Version: 1, Status: adv1.AdStatus_AD_STATUS_PUBLISHED,
 		Spec: &adv1.AdSpec{Title: have, HaveCategory: have, WantCategories: want, NeighborhoodIds: nbh},
-	})
+	}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

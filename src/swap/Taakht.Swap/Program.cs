@@ -21,7 +21,8 @@ var grpcPort = int.Parse(grpcAddr[(grpcAddr.LastIndexOf(':') + 1)..], System.Glo
 builder.WebHost.ConfigureKestrel(o => o.ListenAnyIP(grpcPort, l => l.Protocols = HttpProtocols.Http2));
 
 var adAddr = config["AD_ADDR"] ?? "localhost:9001";
-var paymentDeadline = DurationParser.Parse(config["PAYMENT_DEADLINE"] ?? "1h");
+var paymentDeadline = DurationParser.ParseBounded(
+    "PAYMENT_DEADLINE", config["PAYMENT_DEADLINE"] ?? "1h", TimeSpan.FromMilliseconds(1), TimeSpan.FromDays(30));
 
 builder.Services.AddTaakhtPlatform(config);
 builder.Services.AddTaakhtOutboxRelay();

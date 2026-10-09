@@ -25,13 +25,13 @@ We will take the lock in the Ad service, which owns the ad rows: `LockAds(swap_i
 
 - Positive: all-or-nothing claim with row locks taken in id order (no deadlock between swaps that share an ad); the agreed version is re-checked at the authority; retries and redelivery are safe through the `ad_lock (swap_id, ad_id)` key.
 - Negative / trade-offs we accept: `hidden` ads can also be locked; a refused lock (`FAILED_PRECONDITION`, `NOT_FOUND`, `INVALID_ARGUMENT` or `PERMISSION_DENIED`) ends the negotiation (`SwapRejected` leads to `CANCELLED`) instead of retrying; the other services (matching index, negotiation status) learn about the lock eventually, through `AdLocked` and `ExclusiveLockAcquired`.
-- Follow-ups: a timeout or repair for a negotiation stuck in `AGREEMENT_PENDING` when Swap or Kafka is unavailable.
+- Follow-ups: reconcile a swap that takes the lock after the negotiation was cancelled for timing out (see the architecture document); a repair for a swap stuck in `LOCKING`.
 
 ## Known gaps
 
 - Implemented with `SELECT ... FOR UPDATE` on both ad rows plus checks in code, not the single conditional `UPDATE` that the plan describes. The guarantee is the same.
-- Stuck negotiations: nothing times out `AGREEMENT_PENDING`, and nothing reconciles a swap that stays `LOCKING` other than redelivery of `AgreementReached`.
-- Negotiation consumes `SwapCancelled` and cancels the `AGREED` negotiation of that ad pair (found by ad ids). It does not consume `SwapCompleted`, so a completed swap leaves it `AGREED`. Competitors cancelled at lock time stay cancelled.
+- Stuck negotiations: a sweeper in Negotiation republishes `AgreementReached` up to three times (every `AGREEMENT_PENDING_TIMEOUT`, default 10 minutes) and then cancels the negotiation; a swap that stays `LOCKING` is only retried through those republished events. If the swap locks after the cancellation, `ExclusiveLockAcquired` for a `CANCELLED` negotiation is ignored and logged, so the swap can complete while the negotiation shows `CANCELLED`.
+- Negotiation consumes `SwapCancelled` and cancels the `AGREED` negotiation named by the event's `negotiation_id` (the ad pair is used only for events without that field). It acts on `ExclusiveLockAcquired` only for an existing `AGREEMENT_PENDING` or `AGREED` winner whose ads match the event. It does not consume `SwapCompleted`, so a completed swap leaves it `AGREED`. Competitors cancelled at lock time stay cancelled.
 - The caller check on `LockAds` requires `x-user-id: system:swap` together with the shared `INTERNAL_AUTH_TOKEN` (`x-internal-token`); a bare `system:swap` is `UNAUTHENTICATED`. It is one secret for all services, not a per-service cryptographic identity (see [authenticate service-to-service calls](authenticate-service-to-service-calls.md)).
 - Consistency between the lock and the search index is eventual: Matching removes an ad when `AdLocked` arrives, so a locked ad can briefly appear in `Search` results. A user acting on such a result is stopped at `OpenNegotiation` (the target must be published) or at `LockAds`.
 - Only overlapping swaps in one process were tested (concurrent goroutines); there is no multi-process load test.

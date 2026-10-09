@@ -99,7 +99,8 @@ public sealed class SwapNegotiation
 
         if (requesterAd.OwnerId != requesterUserId)
         {
-            throw new DomainException(DomainError.PermissionDenied, "caller does not own the requester ad");
+            // Same answer as for a missing ad: the caller must not learn that someone else's ad exists.
+            throw new DomainException(DomainError.NotFound, AdNotAvailable);
         }
 
         if (requesterAd.OwnerId == targetAd.OwnerId)
@@ -114,7 +115,8 @@ public sealed class SwapNegotiation
 
         if (targetAd.Status != AdStatus.Published)
         {
-            throw new DomainException(DomainError.FailedPrecondition, "the target ad must be published");
+            // A hidden, locked or closed ad of someone else looks exactly like a missing one.
+            throw new DomainException(DomainError.NotFound, AdNotAvailable);
         }
 
         var first = new Proposal(Guid.NewGuid(), 1, Terms.Default, null);
@@ -123,6 +125,9 @@ public sealed class SwapNegotiation
             NegotiationStatus.Open, first, null, 1, string.Empty, 1, now, now,
             [new Approval(requesterUserId, ApprovalKind.Ad, targetAd.Version)]);
     }
+
+    /// <summary>The one message for "no such ad" and "an ad you may not use", so the two cannot be told apart.</summary>
+    public const string AdNotAvailable = "ad not available";
 
     /// <summary>Upper bound for a price difference (toman); keeps amounts well inside bigint and sane.</summary>
     public const long MaxPriceDifference = 1_000_000_000_000;

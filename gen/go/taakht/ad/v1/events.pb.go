@@ -23,9 +23,12 @@ const (
 
 // Topic: ad.events. Key: ad id.
 // Published/Edited/Released carry the full snapshot so consumers never call back.
+// Every event carries seq: a per-ad counter incremented on every event of that ad (ad.event_seq),
+// so consumers can ignore an event that is older than one they already applied.
 type AdPublished struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ad            *Ad                    `protobuf:"bytes,1,opt,name=ad,proto3" json:"ad,omitempty"`
+	Seq           int64                  `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -67,9 +70,17 @@ func (x *AdPublished) GetAd() *Ad {
 	return nil
 }
 
+func (x *AdPublished) GetSeq() int64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
 type AdEdited struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ad            *Ad                    `protobuf:"bytes,1,opt,name=ad,proto3" json:"ad,omitempty"`
+	Seq           int64                  `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -111,9 +122,17 @@ func (x *AdEdited) GetAd() *Ad {
 	return nil
 }
 
+func (x *AdEdited) GetSeq() int64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
 type AdHidden struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AdId          string                 `protobuf:"bytes,1,opt,name=ad_id,json=adId,proto3" json:"ad_id,omitempty"`
+	Seq           int64                  `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -155,10 +174,18 @@ func (x *AdHidden) GetAdId() string {
 	return ""
 }
 
+func (x *AdHidden) GetSeq() int64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
 type AdLocked struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AdId          string                 `protobuf:"bytes,1,opt,name=ad_id,json=adId,proto3" json:"ad_id,omitempty"`
 	SwapId        string                 `protobuf:"bytes,2,opt,name=swap_id,json=swapId,proto3" json:"swap_id,omitempty"`
+	Seq           int64                  `protobuf:"varint,3,opt,name=seq,proto3" json:"seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -207,12 +234,20 @@ func (x *AdLocked) GetSwapId() string {
 	return ""
 }
 
+func (x *AdLocked) GetSeq() int64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
 type AdReleased struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	AdId   string                 `protobuf:"bytes,1,opt,name=ad_id,json=adId,proto3" json:"ad_id,omitempty"`
 	SwapId string                 `protobuf:"bytes,2,opt,name=swap_id,json=swapId,proto3" json:"swap_id,omitempty"`
 	// The ad after release (status is published or hidden).
-	Ad            *Ad `protobuf:"bytes,3,opt,name=ad,proto3" json:"ad,omitempty"`
+	Ad            *Ad   `protobuf:"bytes,3,opt,name=ad,proto3" json:"ad,omitempty"`
+	Seq           int64 `protobuf:"varint,4,opt,name=seq,proto3" json:"seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -268,10 +303,18 @@ func (x *AdReleased) GetAd() *Ad {
 	return nil
 }
 
+func (x *AdReleased) GetSeq() int64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
 type AdClosed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AdId          string                 `protobuf:"bytes,1,opt,name=ad_id,json=adId,proto3" json:"ad_id,omitempty"`
 	SwapId        string                 `protobuf:"bytes,2,opt,name=swap_id,json=swapId,proto3" json:"swap_id,omitempty"`
+	Seq           int64                  `protobuf:"varint,3,opt,name=seq,proto3" json:"seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -320,28 +363,41 @@ func (x *AdClosed) GetSwapId() string {
 	return ""
 }
 
+func (x *AdClosed) GetSeq() int64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
 var File_taakht_ad_v1_events_proto protoreflect.FileDescriptor
 
 const file_taakht_ad_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x19taakht/ad/v1/events.proto\x12\ftaakht.ad.v1\x1a\x15taakht/ad/v1/ad.proto\"/\n" +
+	"\x19taakht/ad/v1/events.proto\x12\ftaakht.ad.v1\x1a\x15taakht/ad/v1/ad.proto\"A\n" +
 	"\vAdPublished\x12 \n" +
-	"\x02ad\x18\x01 \x01(\v2\x10.taakht.ad.v1.AdR\x02ad\",\n" +
+	"\x02ad\x18\x01 \x01(\v2\x10.taakht.ad.v1.AdR\x02ad\x12\x10\n" +
+	"\x03seq\x18\x02 \x01(\x03R\x03seq\">\n" +
 	"\bAdEdited\x12 \n" +
-	"\x02ad\x18\x01 \x01(\v2\x10.taakht.ad.v1.AdR\x02ad\"\x1f\n" +
+	"\x02ad\x18\x01 \x01(\v2\x10.taakht.ad.v1.AdR\x02ad\x12\x10\n" +
+	"\x03seq\x18\x02 \x01(\x03R\x03seq\"1\n" +
 	"\bAdHidden\x12\x13\n" +
-	"\x05ad_id\x18\x01 \x01(\tR\x04adId\"8\n" +
+	"\x05ad_id\x18\x01 \x01(\tR\x04adId\x12\x10\n" +
+	"\x03seq\x18\x02 \x01(\x03R\x03seq\"J\n" +
 	"\bAdLocked\x12\x13\n" +
 	"\x05ad_id\x18\x01 \x01(\tR\x04adId\x12\x17\n" +
-	"\aswap_id\x18\x02 \x01(\tR\x06swapId\"\\\n" +
+	"\aswap_id\x18\x02 \x01(\tR\x06swapId\x12\x10\n" +
+	"\x03seq\x18\x03 \x01(\x03R\x03seq\"n\n" +
 	"\n" +
 	"AdReleased\x12\x13\n" +
 	"\x05ad_id\x18\x01 \x01(\tR\x04adId\x12\x17\n" +
 	"\aswap_id\x18\x02 \x01(\tR\x06swapId\x12 \n" +
-	"\x02ad\x18\x03 \x01(\v2\x10.taakht.ad.v1.AdR\x02ad\"8\n" +
+	"\x02ad\x18\x03 \x01(\v2\x10.taakht.ad.v1.AdR\x02ad\x12\x10\n" +
+	"\x03seq\x18\x04 \x01(\x03R\x03seq\"J\n" +
 	"\bAdClosed\x12\x13\n" +
 	"\x05ad_id\x18\x01 \x01(\tR\x04adId\x12\x17\n" +
-	"\aswap_id\x18\x02 \x01(\tR\x06swapIdB?Z.github.com/taakht/taakht/gen/taakht/ad/v1;adv1\xaa\x02\fTaakht.Ad.V1b\x06proto3"
+	"\aswap_id\x18\x02 \x01(\tR\x06swapId\x12\x10\n" +
+	"\x03seq\x18\x03 \x01(\x03R\x03seqB?Z.github.com/taakht/taakht/gen/taakht/ad/v1;adv1\xaa\x02\fTaakht.Ad.V1b\x06proto3"
 
 var (
 	file_taakht_ad_v1_events_proto_rawDescOnce sync.Once

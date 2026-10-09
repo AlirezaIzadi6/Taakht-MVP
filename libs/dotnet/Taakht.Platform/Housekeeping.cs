@@ -17,7 +17,11 @@ public sealed record HousekeepingOptions
 {
     public const string OutboxRetentionKey = "OUTBOX_RETENTION";
     public const string ProcessedEventsRetentionKey = "PROCESSED_EVENTS_RETENTION";
+    public const string DeadLetterRetentionKey = "DEAD_LETTER_RETENTION";
     public const string PruneIntervalKey = "PRUNE_INTERVAL";
+
+    /// <summary>Upper bound for the day component; keeps durations far from TimeSpan overflow.</summary>
+    public const int MaxDays = 36500;
 
     public static readonly TimeSpan MinDuration = TimeSpan.FromMinutes(1);
 
@@ -27,13 +31,15 @@ public sealed record HousekeepingOptions
 
     public TimeSpan ProcessedEventsRetention { get; init; } = TimeSpan.FromDays(7);
 
+    public TimeSpan DeadLetterRetention { get; init; } = TimeSpan.FromDays(30);
+
     public TimeSpan Interval { get; init; } = TimeSpan.FromMinutes(10);
 
     public TimeSpan InitialDelay { get; init; } = TimeSpan.FromSeconds(30);
 
     public int BatchSize { get; init; } = 1000;
 
-    /// <summary>Reads OUTBOX_RETENTION, PROCESSED_EVENTS_RETENTION and PRUNE_INTERVAL (e.g. 24h, 7d, 10m) and validates.</summary>
+    /// <summary>Reads OUTBOX_RETENTION, PROCESSED_EVENTS_RETENTION, DEAD_LETTER_RETENTION and PRUNE_INTERVAL (e.g. 24h, 7d, 10m) and validates.</summary>
     public static HousekeepingOptions FromConfiguration(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -49,6 +55,7 @@ public sealed record HousekeepingOptions
         {
             OutboxRetention = Read(lookup, OutboxRetentionKey, defaults.OutboxRetention),
             ProcessedEventsRetention = Read(lookup, ProcessedEventsRetentionKey, defaults.ProcessedEventsRetention),
+            DeadLetterRetention = Read(lookup, DeadLetterRetentionKey, defaults.DeadLetterRetention),
             Interval = Read(lookup, PruneIntervalKey, defaults.Interval),
         };
         options.Validate();
@@ -64,7 +71,12 @@ public sealed record HousekeepingOptions
         var m = _dayPrefix.Match(text);
         if (m.Success)
         {
-            total = TimeSpan.FromDays(long.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture));
+            if (!long.TryParse(m.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var days) || days > MaxDays)
+            {
+                throw new FormatException($"Invalid duration '{value}': more than {MaxDays} days.");
+            }
+
+            total = TimeSpan.FromDays(days);
             text = m.Groups[2].Value;
             if (text.Length == 0)
             {
@@ -77,7 +89,11 @@ public sealed record HousekeepingOptions
         {
             foreach (Match part in matches)
             {
-                var n = long.Parse(part.Groups[1].Value, CultureInfo.InvariantCulture);
+                if (!long.TryParse(part.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) || n > MaxDays * 24L * 3600)
+                {
+                    throw new FormatException($"Invalid duration '{value}': number too large.");
+                }
+
                 total += part.Groups[2].Value switch
                 {
                     "ms" => TimeSpan.FromMilliseconds(n),
@@ -98,11 +114,36 @@ public sealed record HousekeepingOptions
         throw new FormatException($"Invalid duration '{value}'; use e.g. 90s, 10m, 24h, 7d or 1d12h.");
     }
 
+    /// <summary>
+    /// Parses a duration setting (<see cref="ParseDuration"/> syntax) and requires <paramref name="min"/> &lt;= value &lt;= <paramref name="max"/>.
+    /// The error names the setting, so a bad value fails startup with a clear message.
+    /// </summary>
+    public static TimeSpan ParseBounded(string name, string value, TimeSpan min, TimeSpan max)
+    {
+        TimeSpan parsed;
+        try
+        {
+            parsed = ParseDuration(value);
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException or OverflowException)
+        {
+            throw new FormatException($"{name}: {ex.Message}", ex);
+        }
+
+        if (parsed < min || parsed > max)
+        {
+            throw new ArgumentOutOfRangeException(name, parsed, $"{name}={value} must be between {min} and {max}.");
+        }
+
+        return parsed;
+    }
+
     /// <summary>Throws when a retention or the interval is below one minute.</summary>
     public void Validate()
     {
         Require(OutboxRetentionKey, OutboxRetention);
         Require(ProcessedEventsRetentionKey, ProcessedEventsRetention);
+        Require(DeadLetterRetentionKey, DeadLetterRetention);
         Require(PruneIntervalKey, Interval);
         if (BatchSize <= 0)
         {
@@ -138,8 +179,8 @@ public sealed record HousekeepingOptions
 }
 
 /// <summary>
-/// Prunes the outbox (published rows older than the retention; unpublished rows are never touched) and
-/// processed_events tables in batches, once shortly after startup and then every interval.
+/// Prunes the outbox (published rows older than the retention; unpublished rows are never touched),
+/// processed_events and dead_letter tables in batches, once shortly after startup and then every interval.
 /// </summary>
 public sealed class HousekeepingService(
     NpgsqlDataSource dataSource, HousekeepingOptions options, ILogger<HousekeepingService> logger) : BackgroundService
@@ -174,8 +215,8 @@ public sealed class HousekeepingService(
         }
     }
 
-    /// <summary>Runs one sweep and returns the number of deleted (outbox, processed_events) rows. Public for tests.</summary>
-    public async Task<(long Outbox, long ProcessedEvents)> PruneOnceAsync(CancellationToken ct = default)
+    /// <summary>Runs one sweep and returns the number of deleted (outbox, processed_events, dead_letter) rows. Public for tests.</summary>
+    public async Task<(long Outbox, long ProcessedEvents, long DeadLetter)> PruneOnceAsync(CancellationToken ct = default)
     {
         var outbox = await DeleteBatchesAsync(
             """
@@ -195,13 +236,25 @@ public sealed class HousekeepingService(
             """,
             options.ProcessedEventsRetention,
             ct);
-        if ((outbox > 0 || processed > 0) && logger.IsEnabled(LogLevel.Information))
+        var deadLetter = await DeleteBatchesAsync(
+            """
+            DELETE FROM dead_letter WHERE (consumer, event_id) IN (
+              SELECT consumer, event_id FROM dead_letter
+              WHERE created_at < now() - make_interval(secs => @secs)
+              LIMIT @n FOR UPDATE SKIP LOCKED)
+            """,
+            options.DeadLetterRetention,
+            ct);
+        if ((outbox > 0 || processed > 0 || deadLetter > 0) && logger.IsEnabled(LogLevel.Information))
         {
             logger.LogInformation(
-                "Housekeeping pruned {OutboxDeleted} outbox and {ProcessedEventsDeleted} processed_events rows", outbox, processed);
+                "Housekeeping pruned {OutboxDeleted} outbox, {ProcessedEventsDeleted} processed_events and {DeadLetterDeleted} dead_letter rows",
+                outbox,
+                processed,
+                deadLetter);
         }
 
-        return (outbox, processed);
+        return (outbox, processed, deadLetter);
     }
 
     private async Task<long> DeleteBatchesAsync(string sql, TimeSpan retention, CancellationToken ct)

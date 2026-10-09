@@ -21,6 +21,7 @@ message SwapCompleted {
   string swap_id = 1;
   string ad_a_id = 2;
   string ad_b_id = 3;
+  string negotiation_id = 4;
 }
 message SwapCancelled {
   string swap_id = 1;
@@ -29,4 +30,5 @@ message SwapCancelled {
   string reason = 4;
   // Set when a party failed to pay in time (feeds Reputation later).
   string defaulting_user_id = 5;
+  string negotiation_id = 6;
 }

@@ -2,6 +2,7 @@ package ad
 
 import (
 	"context"
+	"fmt"
 	"sort"
 
 	adv1 "github.com/taakht/taakht/gen/taakht/ad/v1"
@@ -72,6 +73,15 @@ func (s *Service) EditAd(ctx context.Context, req *adv1.EditAdRequest) (*adv1.Ad
 		}
 		if row.Version != req.ExpectedVersion {
 			return status.Errorf(codes.Aborted, "ad is at version %d, not %d; re-read it", row.Version, req.ExpectedVersion)
+		}
+		current, err := loadSpec(ctx, tx, id, row.Version)
+		if err != nil {
+			return err
+		}
+		if proto.Equal(current.spec, req.Spec) {
+			// Nothing changed: no new version and no event, so approvals and the index are not disturbed.
+			result = row.snapshot(current.spec)
+			return nil
 		}
 		if row.Status == StatusPublished && !HasFilter(req.Spec) {
 			return status.Error(codes.InvalidArgument, "a published ad needs at least one want category or neighborhood")
@@ -154,8 +164,8 @@ func (s *Service) transition(ctx context.Context, adID string, apply func(*adRow
 }
 
 // GetAd: owners read all their ads and versions, system identities (negotiation, swap) read anything,
-// everyone else sees only published ads at their current version. Anything else is NOT_FOUND so
-// existence is not leaked.
+// everyone else sees only published ads at their current version. Anything else is NOT_FOUND with
+// one fixed message, so a missing ad and a hidden one cannot be told apart.
 func (s *Service) GetAd(ctx context.Context, req *adv1.GetAdRequest) (*adv1.Ad, error) {
 	id, err := parseID(req.GetAdId())
 	if err != nil {
@@ -165,6 +175,9 @@ func (s *Service) GetAd(ctx context.Context, req *adv1.GetAdRequest) (*adv1.Ad, 
 		return nil, status.Error(codes.InvalidArgument, "version must not be negative")
 	}
 	row, err := loadAd(ctx, s.pool, id)
+	if status.Code(err) == codes.NotFound {
+		return nil, errAdNotFound // the same answer as for an ad the caller may not see
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +188,7 @@ func (s *Service) GetAd(ctx context.Context, req *adv1.GetAdRequest) (*adv1.Ad, 
 	caller := identity.UserID(ctx)
 	if caller != row.OwnerID && !identity.IsSystem(ctx) &&
 		(row.Status != StatusPublished || version != row.Version) {
-		return nil, status.Error(codes.NotFound, "ad not found")
+		return nil, errAdNotFound
 	}
 	sv, err := loadSpec(ctx, s.pool, id, version)
 	if err != nil {
@@ -346,7 +359,31 @@ func requireOwner(ctx context.Context, row *adRow) error {
 	return nil
 }
 
+var errAdNotFound = status.Error(codes.NotFound, "ad not found")
+
+// emit writes an ad event to the outbox. The caller holds the ad's row lock (key is the ad id), so the
+// per-ad counter moves in the same order as the commits; the event carries the new value as seq.
 func emit(ctx context.Context, tx pgx.Tx, key string, msg proto.Message) error {
+	var seq int64
+	if err := tx.QueryRow(ctx, `UPDATE ad SET event_seq = event_seq + 1 WHERE id = $1 RETURNING event_seq`, key).Scan(&seq); err != nil {
+		return internal("event seq", err)
+	}
+	switch m := msg.(type) {
+	case *adv1.AdPublished:
+		m.Seq = seq
+	case *adv1.AdEdited:
+		m.Seq = seq
+	case *adv1.AdHidden:
+		m.Seq = seq
+	case *adv1.AdLocked:
+		m.Seq = seq
+	case *adv1.AdReleased:
+		m.Seq = seq
+	case *adv1.AdClosed:
+		m.Seq = seq
+	default:
+		return internal("outbox", fmt.Errorf("unsupported ad event %T", msg))
+	}
 	if err := outbox.Add(ctx, tx, Topic, key, msg); err != nil {
 		return internal("outbox", err)
 	}

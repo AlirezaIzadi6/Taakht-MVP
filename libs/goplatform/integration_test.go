@@ -29,6 +29,9 @@ CREATE INDEX outbox_unpublished ON outbox (created_at) WHERE published_at IS NUL
 CREATE TABLE processed_events (
   consumer text NOT NULL, event_id uuid NOT NULL, processed_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (consumer, event_id));
+CREATE TABLE dead_letter (
+  consumer text NOT NULL, event_id uuid NOT NULL, topic text NOT NULL, payload bytea NOT NULL, error text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (consumer, event_id));
 CREATE TABLE seen (event_id uuid, ad_id text);
 `
 
@@ -168,6 +171,19 @@ func TestPermanentFailureDoesNotBlockPartition(t *testing.T) {
 		_ = pool.QueryRow(ctx, `SELECT count(*) FROM seen WHERE ad_id = $1`, key).Scan(&seen)
 		_ = pool.QueryRow(ctx, `SELECT count(*) FROM processed_events WHERE consumer = $1`, group).Scan(&processed)
 		if seen == 1 && processed == 2 {
+			var topicGot, errText string
+			var payload []byte
+			if err := pool.QueryRow(ctx, `SELECT topic, payload, error FROM dead_letter WHERE consumer = $1`, group).
+				Scan(&topicGot, &payload, &errText); err != nil {
+				t.Fatalf("dead_letter row missing: %v", err)
+			}
+			env := &commonv1.Envelope{}
+			if err := proto.Unmarshal(payload, env); err != nil || env.GetType() != "taakht.ad.v1.AdPublished" {
+				t.Fatalf("dead_letter payload = %v, %v", env, err)
+			}
+			if topicGot != topic || !strings.Contains(errText, "poison") {
+				t.Fatalf("dead_letter topic=%q error=%q", topicGot, errText)
+			}
 			return
 		}
 		if time.Now().After(deadline) {

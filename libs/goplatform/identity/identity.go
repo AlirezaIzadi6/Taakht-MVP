@@ -117,7 +117,7 @@ func ServerInterceptor() grpc.UnaryServerInterceptor {
 		if !Valid(id) {
 			return nil, status.Error(codes.Unauthenticated, "invalid x-user-id")
 		}
-		if hasPrefix(id) && !(known(id) && validToken(tokenFromMetadata(ctx))) {
+		if hasPrefix(id) && (!known(id) || !validToken(tokenFromMetadata(ctx))) {
 			return nil, status.Error(codes.Unauthenticated, "system identity requires a valid x-internal-token")
 		}
 		return h(context.WithValue(ctx, ctxKey{}, id), req)

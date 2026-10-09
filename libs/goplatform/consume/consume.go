@@ -52,9 +52,9 @@ type Handler func(ctx context.Context, tx pgx.Tx, env *commonv1.Envelope) error
 // Run consumes topics as group until ctx is cancelled. handlers are keyed by envelope type;
 // unknown types are skipped. For each known event the processed_events insert and the handler
 // share one transaction; the offset is committed afterwards. A failing handler is retried
-// with backoff, which blocks its partition (no DLQ in the MVP), unless it returns Permanent(err):
-// then the failure is logged, the event is recorded as processed (its handler writes are rolled back)
-// and consumption continues.
+// with backoff, which blocks its partition, unless it returns Permanent(err): then the failure is
+// logged at error level, the event is recorded as processed and its envelope plus the error are
+// stored in dead_letter (its handler writes are rolled back), and consumption continues.
 func Run(ctx context.Context, pool *pgxpool.Pool, brokers []string, group string, topics []string, handlers map[string]Handler) error {
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(brokers...),
@@ -117,7 +117,7 @@ func handleWithRetry(ctx context.Context, pool *pgxpool.Pool, group string, hand
 		}
 		if IsPermanent(err) {
 			slog.Error("consume: permanent handler failure, skipping event", "type", env.GetType(), "event_id", env.GetEventId(), "err", err)
-			if serr := markProcessed(ctx, pool, group, env); serr != nil {
+			if serr := recordSkipped(ctx, pool, group, rec.Topic, env, err); serr != nil {
 				slog.Error("consume: cannot record skipped event, retrying", "event_id", env.GetEventId(), "err", serr)
 				err = serr
 			} else {
@@ -134,14 +134,24 @@ func handleWithRetry(ctx context.Context, pool *pgxpool.Pool, group string, hand
 	}
 }
 
-// markProcessed records the event as handled without running a handler.
-func markProcessed(ctx context.Context, pool *pgxpool.Pool, group string, env *commonv1.Envelope) error {
+// recordSkipped records a permanently failed event as processed and keeps its envelope and the
+// error in dead_letter, in one statement so both rows exist or neither does.
+func recordSkipped(ctx context.Context, pool *pgxpool.Pool, group, topic string, env *commonv1.Envelope, cause error) error {
 	eventID, perr := uuid.Parse(env.GetEventId())
 	if perr != nil {
+		slog.Error("consume: skipped event has no valid id, cannot record it", "type", env.GetType(), "err", cause)
 		return nil //nolint:nilerr // an event without a valid id can never be recorded; skipping is all we can do
 	}
-	_, err := pool.Exec(ctx, `INSERT INTO processed_events (consumer, event_id) VALUES ($1, $2)
-		ON CONFLICT DO NOTHING`, group, eventID)
+	payload, merr := proto.Marshal(env)
+	if merr != nil {
+		payload = env.GetPayload()
+	}
+	_, err := pool.Exec(ctx, `
+WITH p AS (
+  INSERT INTO processed_events (consumer, event_id) VALUES ($1, $2) ON CONFLICT DO NOTHING
+)
+INSERT INTO dead_letter (consumer, event_id, topic, payload, error) VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT DO NOTHING`, group, eventID, topic, payload, cause.Error())
 	return err
 }
 

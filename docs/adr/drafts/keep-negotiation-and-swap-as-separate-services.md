@@ -15,7 +15,7 @@ We will keep Negotiation and Swap as two services with separate databases. Negot
 
 ## Options considered
 
-1. **Two services (chosen)** - the two parts have different lifecycles and invariants: Negotiation is interactive, versioned and cancellable; Swap is a short, mostly automatic saga with deadlines and an irreversible outcome. The boundary makes the saga and its failure handling explicit and gives the demo a real cross-service flow. Cost: an extra service, database and Kafka hop (a Swap outage leaves negotiations `AGREEMENT_PENDING`), and agreement that is eventual rather than immediate.
+1. **Two services (chosen)** - the two parts have different lifecycles and invariants: Negotiation is interactive, versioned and cancellable; Swap is a short, mostly automatic saga with deadlines and an irreversible outcome. The boundary makes the saga and its failure handling explicit and gives the demo a real cross-service flow. Cost: an extra service, database and Kafka hop (a Swap outage leaves negotiations `AGREEMENT_PENDING` until the sweeper republishes the agreement and, after three periods, cancels them), and agreement that is eventual rather than immediate.
 2. **One Deal service** - fewer moving parts. Rejected for the MVP: the lock lives in the Ad service anyway, so a single service would still have a cross-service step, and it would hide the saga the project wants to show.
 3. **Swap as a module inside Negotiation** - same deployable, separate code. Not tried; the benefits of a boundary (separate data, separate failure) would be lost, and it contradicts the "service boundary equals ownership boundary" reasoning in [use microservices](use-microservices.md).
 
@@ -23,7 +23,7 @@ We will keep Negotiation and Swap as two services with separate databases. Negot
 
 - Positive: Negotiation has no timers or partner calls; Swap owns the deadline sweeper and the locker mock; the agreement event is a stable contract; each side's state machine is pure code and tested alone.
 - Negative / trade-offs we accept: agreement is asynchronous (the final approval returns `AGREEMENT_PENDING`); Negotiation learns the outcome only through `ExclusiveLockAcquired`, `SwapRejected` and `SwapCancelled`; the agreed terms are copied into the event.
-- Follow-ups: Negotiation consumes `SwapCancelled` (an `AGREED` negotiation becomes `CANCELLED`, matched by the ad pair because the event has no negotiation id) but ignores `SwapCompleted`; decide whether a completed swap needs a negotiation status. If the two always change together, merge them.
+- Follow-ups: Negotiation consumes `SwapCancelled` (an `AGREED` negotiation becomes `CANCELLED`, named by the `negotiation_id` the event carries; the ad pair is only a fallback for events without it) but ignores `SwapCompleted`; decide whether a completed swap needs a negotiation status. If the two always change together, merge them.
 
 ## Known gaps
 

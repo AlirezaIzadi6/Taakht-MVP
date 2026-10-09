@@ -206,3 +206,90 @@ func TestProcessedEventIsIdempotent(t *testing.T) {
 		t.Fatalf("expected exactly one MatchFound across redeliveries, got %d", len(e.sent))
 	}
 }
+
+func (e *env) tombstoned(t *testing.T, id string) bool {
+	t.Helper()
+	var removed bool
+	if err := e.pool.QueryRow(context.Background(), `SELECT removed FROM ad_index WHERE ad_id = $1`, id).Scan(&removed); err != nil {
+		t.Fatalf("no index row for %s: %v", id, err)
+	}
+	return removed
+}
+
+func TestRemovalKeepsTombstoneAndReplayedOlderEventsAreIgnored(t *testing.T) {
+	e := setup(t)
+	id, other := uuid.NewString(), uuid.NewString()
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(other, "user-2", 1, published, "tools", "books"), Seq: 1})
+	pub := &adv1.AdPublished{Ad: ad(id, "user-1", 1, published, "books", "tools"), Seq: 1}
+	e.deliver(t, typPub, pub)
+	if len(e.sent) != 1 {
+		t.Fatalf("expected the initial match, got %v", e.sent)
+	}
+	e.sent = nil
+
+	e.deliver(t, "taakht.ad.v1.AdHidden", &adv1.AdHidden{AdId: id, Seq: 2})
+	if e.indexed(t, id) != nil || !e.tombstoned(t, id) {
+		t.Fatal("hide must leave a tombstone and no search result")
+	}
+	// Replay of the old publish: must not resurrect the ad or notify again.
+	e.deliver(t, typPub, pub)
+	if e.indexed(t, id) != nil || len(e.sent) != 0 {
+		t.Fatalf("replayed AdPublished resurrected a hidden ad (sent %v)", e.sent)
+	}
+
+	// Release re-publishes the SAME version after a lock: its higher seq re-adds the ad.
+	e.deliver(t, "taakht.ad.v1.AdLocked", &adv1.AdLocked{AdId: id, SwapId: "s", Seq: 3})
+	e.deliver(t, "taakht.ad.v1.AdReleased", &adv1.AdReleased{AdId: id, SwapId: "s", Ad: ad(id, "user-1", 1, published, "books", "tools"), Seq: 4})
+	if e.indexed(t, id) == nil {
+		t.Fatal("AdReleased with a higher seq must re-add the ad at the same version")
+	}
+	// A replayed lock (seq 3) is older than the release and must not remove it again.
+	e.deliver(t, "taakht.ad.v1.AdLocked", &adv1.AdLocked{AdId: id, SwapId: "s", Seq: 3})
+	if e.indexed(t, id) == nil {
+		t.Fatal("replayed AdLocked removed a re-released ad")
+	}
+
+	e.deliver(t, "taakht.ad.v1.AdClosed", &adv1.AdClosed{AdId: id, SwapId: "s2", Seq: 6})
+	e.deliver(t, "taakht.ad.v1.AdReleased", &adv1.AdReleased{AdId: id, SwapId: "s", Ad: ad(id, "user-1", 1, published, "books", "tools"), Seq: 4})
+	if e.indexed(t, id) != nil {
+		t.Fatal("replayed AdReleased resurrected a closed ad")
+	}
+	// An equal seq is a duplicate, a strictly higher one wins.
+	e.deliver(t, typEdit, &adv1.AdEdited{Ad: ad(id, "user-1", 2, published, "books", "tools"), Seq: 6})
+	if e.indexed(t, id) != nil {
+		t.Fatal("an event with seq equal to the tombstone's must be ignored")
+	}
+	e.deliver(t, typEdit, &adv1.AdEdited{Ad: ad(id, "user-1", 2, published, "books", "tools"), Seq: 7})
+	if got := e.indexed(t, id); got == nil || got.GetVersion() != 2 {
+		t.Fatalf("higher seq must re-add: %v", got)
+	}
+}
+
+func TestRemovalBeforeAnyIndexRowStillProtects(t *testing.T) {
+	e := setup(t)
+	id := uuid.NewString()
+	// The hide overtakes the publish (replay from an offset reset, or a reordered topic): no row exists yet.
+	e.deliver(t, "taakht.ad.v1.AdHidden", &adv1.AdHidden{AdId: id, Seq: 5})
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(id, "user-1", 1, published, "books", "tools"), Seq: 4})
+	if e.indexed(t, id) != nil {
+		t.Fatal("older publish after a newer hide must be ignored")
+	}
+	// A snapshot that is not published removes with its seq too.
+	e.deliver(t, typEdit, &adv1.AdEdited{Ad: ad(id, "user-1", 3, hidden, "books", "tools"), Seq: 6})
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(id, "user-1", 2, published, "books", "tools"), Seq: 5})
+	if e.indexed(t, id) != nil {
+		t.Fatal("older publish after an unpublished snapshot must be ignored")
+	}
+}
+
+func TestLegacyEventsWithoutSeqKeepWorking(t *testing.T) {
+	e := setup(t)
+	id := uuid.NewString()
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(id, "user-1", 1, published, "books", "tools")})
+	e.deliver(t, typPub, &adv1.AdPublished{Ad: ad(id, "user-1", 1, published, "books", "tools"), Seq: 3})
+	// A legacy hide (no seq) is older than sequenced state: ignored.
+	e.deliver(t, "taakht.ad.v1.AdHidden", &adv1.AdHidden{AdId: id})
+	if e.indexed(t, id) == nil {
+		t.Fatal("legacy removal must not override sequenced state")
+	}
+}

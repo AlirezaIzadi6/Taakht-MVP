@@ -13,6 +13,11 @@ var config = builder.Configuration;
 var grpcAddr = config["GRPC_ADDR"] ?? ":9003";
 var adAddr = config["AD_ADDR"] ?? "localhost:9001";
 var cap = int.Parse(config["NEGOTIATION_CAP"] ?? "10", CultureInfo.InvariantCulture);
+var agreementPendingTimeout = HousekeepingOptions.ParseBounded(
+    "AGREEMENT_PENDING_TIMEOUT",
+    config["AGREEMENT_PENDING_TIMEOUT"] ?? "10m",
+    NegotiationOptions.MinAgreementPendingTimeout,
+    NegotiationOptions.MaxAgreementPendingTimeout);
 
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
@@ -32,10 +37,11 @@ builder.Services.AddTaakhtPlatform(config);
 builder.Services.AddTaakhtOutboxRelay();
 builder.Services.AddTaakhtHousekeeping();
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton(new NegotiationOptions(cap));
+builder.Services.AddSingleton(new NegotiationOptions(cap) { AgreementPendingTimeout = agreementPendingTimeout });
 builder.Services.AddSingleton<ILockerEligibility, MockLockerEligibility>();
 builder.Services.AddSingleton<NegotiationService>();
 builder.Services.AddSingleton<EventHandlers>();
+builder.Services.AddHostedService<AgreementPendingSweeper>();
 builder.Services.AddSingleton<IAdClient, GrpcAdClient>();
 builder.Services.AddGrpcClient<AdService.AdServiceClient>(o => o.Address = new Uri(adAddr.Contains("://", StringComparison.Ordinal) ? adAddr : $"http://{adAddr}"))
     .AddInterceptor<ClientIdentityInterceptor>();

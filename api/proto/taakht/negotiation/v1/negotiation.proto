@@ -3,6 +3,7 @@ syntax = "proto3";
 package taakht.negotiation.v1;
 
 import "google/api/annotations.proto";
+import "taakht/ad/v1/ad.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/taakht/taakht/gen/taakht/negotiation/v1;negotiationv1";
@@ -72,6 +73,10 @@ message Negotiation {
   string cancel_reason = 9;
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
+  // The two ads as they are now (current version), for the parties only. Empty when the Ad service
+  // could not be reached or the ad cannot be read; the rest of the message is still valid.
+  taakht.ad.v1.Ad requester_ad = 12;
+  taakht.ad.v1.Ad target_ad = 13;
 }
 
 service NegotiationService {

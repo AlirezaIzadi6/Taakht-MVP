@@ -24,6 +24,10 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
             }
         }
 
+        public HashSet<string> BrokenDetails { get; } = [];
+
+        public List<string> DetailCalls { get; } = [];
+
         public Task<AdSnapshot?> GetAdAsync(string adId, CancellationToken ct)
         {
             lock (_gate)
@@ -31,9 +35,41 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
                 return Task.FromResult(_ads.GetValueOrDefault(adId));
             }
         }
+
+        public Task<Taakht.Ad.V1.Ad?> GetAdDetailsAsync(string adId, CancellationToken ct)
+        {
+            lock (_gate)
+            {
+                DetailCalls.Add(adId);
+                if (BrokenDetails.Contains(adId))
+                {
+                    throw new Grpc.Core.RpcException(new Grpc.Core.Status(Grpc.Core.StatusCode.Unavailable, "ad down"));
+                }
+
+                return Task.FromResult(_ads.TryGetValue(adId, out var ad)
+                    ? new Taakht.Ad.V1.Ad
+                    {
+                        Id = ad.AdId,
+                        OwnerId = ad.OwnerId,
+                        Version = ad.Version,
+                        Status = Taakht.Ad.V1.AdStatus.Published,
+                        Spec = new Taakht.Ad.V1.AdSpec { Title = "title-" + ad.AdId },
+                    }
+                    : null);
+            }
+        }
     }
 
-    private sealed record Harness(FakeAdClient Ads, NegotiationService Service, EventHandlers Events, NpgsqlDataSource Db)
+    private sealed class FakeClock(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset _now = start;
+
+        public void Advance(TimeSpan by) => _now += by;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+    }
+
+    private sealed record Harness(FakeAdClient Ads, NegotiationService Service, EventHandlers Events, NpgsqlDataSource Db, FakeClock Clock)
     {
         public void SetAll(params AdSnapshot[] ads)
         {
@@ -64,11 +100,54 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
         }
 
         var ads = new FakeAdClient();
+        var clock = new FakeClock(DateTimeOffset.UtcNow);
         var service = new NegotiationService(
-            db.DataSource, ads, new MockLockerEligibility(), new NegotiationOptions(cap), TimeProvider.System,
-            NullLogger<NegotiationService>.Instance);
-        return new Harness(ads, service, new EventHandlers(TimeProvider.System, NullLogger<EventHandlers>.Instance), db.DataSource);
+            db.DataSource, ads, new MockLockerEligibility(),
+            new NegotiationOptions(cap) { AgreementPendingTimeout = _pendingTimeout }, clock, NullLogger<NegotiationService>.Instance);
+        return new Harness(ads, service, new EventHandlers(clock, NullLogger<EventHandlers>.Instance), db.DataSource, clock);
     }
+
+    private static readonly TimeSpan _pendingTimeout = TimeSpan.FromMinutes(10);
+
+    // Two users, two published ads, all four approvals: the negotiation ends AGREEMENT_PENDING.
+    private static async Task<(Guid Id, AdSnapshot RequesterAd, AdSnapshot TargetAd)> PendingAsync(Harness h, string requester, string target)
+    {
+        var a = NewAd(requester);
+        var b = NewAd(target);
+        h.SetAll(a, b);
+        var id = (await h.Service.OpenAsync(requester, a.AdId, b.AdId, default)).Negotiation.Id;
+        await h.Service.ApproveAdAsync(target, id, 1, default);
+        await h.Service.ApproveProposalAsync(requester, id, 1, default);
+        var view = await h.Service.ApproveProposalAsync(target, id, 1, default);
+        Assert.Equal(NegotiationStatus.AgreementPending, view.Negotiation.Status);
+        return (id, a, b);
+    }
+
+    // The database is shared by all tests of the class and the sweeper looks at every pending row: start from none.
+    private static async Task ClearPendingAsync(Harness h)
+    {
+        await using var conn = await h.Db.OpenConnectionAsync();
+        await conn.ExecuteAsync("UPDATE negotiation SET status = 'CANCELLED' WHERE status = 'AGREEMENT_PENDING'");
+    }
+
+    private static Taakht.Swap.V1.ExclusiveLockAcquired LockEvent(Guid winner, string adA, string adB) => new()
+    {
+        SwapId = Guid.NewGuid().ToString(),
+        NegotiationId = winner.ToString(),
+        AdAId = adA,
+        AdBId = adB,
+    };
+
+    private static async Task ApplyLockAsync(Harness h, Taakht.Swap.V1.ExclusiveLockAcquired e)
+    {
+        await using var conn = await h.Db.OpenConnectionAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        await h.Events.OnExclusiveLockAsync(conn, tx, e);
+        await tx.CommitAsync();
+    }
+
+    private static async Task<NegotiationStatus> StatusOfAsync(Harness h, Guid id, string user) =>
+        (await h.Service.GetAsync(user, id, default)).Negotiation.Status;
 
     [Fact]
     public async Task ApprovalFlowReachesAgreementAndWritesOutbox()
@@ -405,6 +484,7 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
         h.SetAll(mine, t1, t2);
 
         var first = (await h.Service.OpenAsync(u1, mine.AdId, t1.AdId, default)).Negotiation.Id;
+        h.Clock.Advance(TimeSpan.FromSeconds(1));
         var second = (await h.Service.OpenAsync(u1, mine.AdId, t2.AdId, default)).Negotiation.Id;
 
         var ex = await Assert.ThrowsAsync<DomainException>(() => h.Service.GetAsync(u3, first, default));
@@ -454,5 +534,271 @@ public sealed class NegotiationPostgresTests(PostgresFixture db) : IClassFixture
         var ok = await h.Service.ReviseProposalAsync(
             "user-1", id, 1, new Terms(DeliveryMethod.Locker, DeliveryMethod.InPerson, 0, string.Empty), default);
         Assert.Equal(2, ok.Negotiation.ActiveProposal.Number);
+    }
+
+    [Fact]
+    public async Task StaleLockEventOfACancelledWinnerDoesNotCancelANewPendingNegotiation()
+    {
+        if (Create() is not { } h)
+        {
+            return;
+        }
+
+        // N3 won ads (A, C) once (swap3) and was later cancelled with its swap; N1 on (A, B) is pending now.
+        var adA = NewAd("user-1");
+        var adB = NewAd("user-2");
+        var adC = NewAd("user-3");
+        h.SetAll(adA, adB, adC);
+        var n3 = (await h.Service.OpenAsync("user-3", adC.AdId, adA.AdId, default)).Negotiation.Id;
+        await h.Service.ApproveAdAsync("user-1", n3, 1, default);
+        await h.Service.ApproveProposalAsync("user-1", n3, 1, default);
+        await h.Service.ApproveProposalAsync("user-3", n3, 1, default);
+        var swap3 = LockEvent(n3, adC.AdId, adA.AdId);
+        await ApplyLockAsync(h, swap3);
+        await ApplyCancelledAsync(h, new Taakht.Swap.V1.SwapCancelled { SwapId = swap3.SwapId, NegotiationId = n3.ToString(), Reason = "locker fee not paid in time" });
+        Assert.Equal(NegotiationStatus.Cancelled, await StatusOfAsync(h, n3, "user-1"));
+
+        var n1 = (await h.Service.OpenAsync("user-2", adB.AdId, adA.AdId, default)).Negotiation.Id;
+        await h.Service.ApproveAdAsync("user-1", n1, 1, default);
+        await h.Service.ApproveProposalAsync("user-1", n1, 1, default);
+        await h.Service.ApproveProposalAsync("user-2", n1, 1, default);
+        Assert.Equal(NegotiationStatus.AgreementPending, await StatusOfAsync(h, n1, "user-1"));
+
+        // The old lock event for swap3 is delivered again (replay / late consumer).
+        await ApplyLockAsync(h, swap3);
+
+        Assert.Equal(NegotiationStatus.AgreementPending, await StatusOfAsync(h, n1, "user-1"));
+        Assert.Equal(NegotiationStatus.Cancelled, await StatusOfAsync(h, n3, "user-1"));
+        Assert.DoesNotContain(await h.OutboxAsync(n1), e => e.Type == NegV1.NegotiationClosed.Descriptor.FullName);
+    }
+
+    [Fact]
+    public async Task LockEventForUnknownOrMismatchedWinnerIsIgnored()
+    {
+        if (Create() is not { } h)
+        {
+            return;
+        }
+
+        var (winner, a, b) = await PendingAsync(h, "user-1", "user-2");
+        var c = NewAd("user-3");
+        h.SetAll(c);
+        var other = (await h.Service.OpenAsync("user-3", c.AdId, b.AdId, default)).Negotiation.Id;
+
+        await ApplyLockAsync(h, LockEvent(Guid.NewGuid(), a.AdId, b.AdId)); // unknown winner
+        await ApplyLockAsync(h, LockEvent(winner, a.AdId, c.AdId)); // ads that are not the winner's
+        Assert.Equal(NegotiationStatus.AgreementPending, await StatusOfAsync(h, winner, "user-1"));
+        Assert.Equal(NegotiationStatus.Open, await StatusOfAsync(h, other, "user-3"));
+
+        await ApplyLockAsync(h, LockEvent(winner, b.AdId, a.AdId)); // the right pair, either order
+        Assert.Equal(NegotiationStatus.Agreed, await StatusOfAsync(h, winner, "user-1"));
+        Assert.Equal(NegotiationStatus.Cancelled, await StatusOfAsync(h, other, "user-3"));
+    }
+
+    [Fact]
+    public async Task SwapCancelledUsesTheNegotiationIdAndFallsBackToTheAdPairOnlyWhenItIsEmpty()
+    {
+        if (Create() is not { } h)
+        {
+            return;
+        }
+
+        var (n1, a, b) = await PendingAsync(h, "user-1", "user-2");
+        await ApplyLockAsync(h, LockEvent(n1, a.AdId, b.AdId));
+        Assert.Equal(NegotiationStatus.Agreed, await StatusOfAsync(h, n1, "user-1"));
+
+        // Another agreed negotiation must be untouched when the event names n1.
+        var (n2, a2, b2) = await PendingAsync(h, "user-3", "user-4");
+        await ApplyLockAsync(h, LockEvent(n2, a2.AdId, b2.AdId));
+        Assert.Equal(NegotiationStatus.Agreed, await StatusOfAsync(h, n2, "user-3"));
+
+        await ApplyCancelledAsync(h, new Taakht.Swap.V1.SwapCancelled
+        {
+            SwapId = "s",
+            NegotiationId = n1.ToString(),
+            AdAId = "ignored",
+            AdBId = "ignored",
+            Reason = "r1",
+        });
+        Assert.Equal(NegotiationStatus.Cancelled, await StatusOfAsync(h, n1, "user-1"));
+        Assert.Equal(NegotiationStatus.Agreed, await StatusOfAsync(h, n2, "user-3"));
+
+        // A malformed id is an error, not a fallback to the ad pair.
+        await ApplyCancelledAsync(h, new Taakht.Swap.V1.SwapCancelled { SwapId = "s", NegotiationId = "nope", AdAId = a2.AdId, AdBId = b2.AdId });
+        Assert.Equal(NegotiationStatus.Agreed, await StatusOfAsync(h, n2, "user-3"));
+
+        // An unknown negotiation id does nothing either.
+        await ApplyCancelledAsync(h, new Taakht.Swap.V1.SwapCancelled { SwapId = "s", NegotiationId = Guid.NewGuid().ToString() });
+        Assert.Equal(NegotiationStatus.Agreed, await StatusOfAsync(h, n2, "user-3"));
+    }
+
+    [Fact]
+    public async Task SweeperRepublishesThreeTimesThenCancelsAndLateEventsAreHandledSafely()
+    {
+        if (Create() is not { } h)
+        {
+            return;
+        }
+
+        await ClearPendingAsync(h);
+        var (id, a, b) = await PendingAsync(h, "user-1", "user-2");
+        var competitor = NewAd("user-3");
+        h.SetAll(competitor);
+        var other = (await h.Service.OpenAsync("user-3", competitor.AdId, b.AdId, default)).Negotiation.Id;
+
+        static int Count(IEnumerable<Envelope> events) => events.Count(e => e.Type == NegV1.AgreementReached.Descriptor.FullName);
+        Assert.Equal(1, Count(await h.OutboxAsync(id)));
+
+        // Not due yet: nothing happens, in particular no cancel.
+        h.Clock.Advance(_pendingTimeout - TimeSpan.FromSeconds(1));
+        Assert.Equal(0, await h.Service.SweepAgreementPendingAsync(default));
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            h.Clock.Advance(TimeSpan.FromSeconds(attempt == 1 ? 2 : _pendingTimeout.TotalSeconds));
+            Assert.Equal(1, await h.Service.SweepAgreementPendingAsync(default));
+            Assert.Equal(0, await h.Service.SweepAgreementPendingAsync(default)); // once per period
+            Assert.Equal(NegotiationStatus.AgreementPending, await StatusOfAsync(h, id, "user-1"));
+            Assert.Equal(1 + attempt, Count(await h.OutboxAsync(id)));
+        }
+
+        // Every republished event carries the original agreed versions and a fresh event id.
+        var events = (await h.OutboxAsync(id)).Where(e => e.Type == NegV1.AgreementReached.Descriptor.FullName).ToList();
+        Assert.Equal(4, events.Select(e => e.EventId).Distinct().Count());
+        foreach (var e in events)
+        {
+            var payload = NegV1.AgreementReached.Parser.ParseFrom(e.Payload);
+            Assert.Equal(id.ToString(), payload.NegotiationId);
+            Assert.Equal((a.AdId, 1), (payload.AdA.AdId, payload.AdA.Version));
+            Assert.Equal((b.AdId, 1), (payload.AdB.AdId, payload.AdB.Version));
+        }
+
+        // The ad_ref moving on does not change what is republished (the agreed versions are stored).
+        h.Clock.Advance(_pendingTimeout + TimeSpan.FromSeconds(1));
+        Assert.Equal(1, await h.Service.SweepAgreementPendingAsync(default));
+        var cancelled = (await h.Service.GetAsync("user-1", id, default)).Negotiation;
+        Assert.Equal(NegotiationStatus.Cancelled, cancelled.Status);
+        Assert.Equal(NegotiationService.AgreementTimedOutReason, cancelled.CancelReason);
+        Assert.Equal(4, Count(await h.OutboxAsync(id)));
+        var closed = Assert.Single(await h.OutboxAsync(id), e => e.Type == NegV1.NegotiationClosed.Descriptor.FullName);
+        Assert.Equal(NegV1.NegotiationStatus.Cancelled, NegV1.NegotiationClosed.Parser.ParseFrom(closed.Payload).Status);
+        Assert.Equal(0, await h.Service.SweepAgreementPendingAsync(default));
+
+        // A late SwapRejected is ignored (not pending any more); so is a late lock event, which must not cancel
+        // anybody: that is the documented residual risk, logged for an operator.
+        await using (var conn = await h.Db.OpenConnectionAsync())
+        await using (var tx = await conn.BeginTransactionAsync())
+        {
+            await h.Events.OnSwapRejectedAsync(conn, tx, new Taakht.Swap.V1.SwapRejected { NegotiationId = id.ToString(), Reason = "late" });
+            await tx.CommitAsync();
+        }
+
+        await ApplyLockAsync(h, LockEvent(id, a.AdId, b.AdId));
+        Assert.Equal(NegotiationStatus.Cancelled, await StatusOfAsync(h, id, "user-1"));
+        Assert.Equal(NegotiationService.AgreementTimedOutReason, (await h.Service.GetAsync("user-1", id, default)).Negotiation.CancelReason);
+        Assert.Equal(NegotiationStatus.Open, await StatusOfAsync(h, other, "user-3"));
+    }
+
+    [Fact]
+    public async Task SweeperLeavesAnAnsweredNegotiationAlone()
+    {
+        if (Create() is not { } h)
+        {
+            return;
+        }
+
+        await ClearPendingAsync(h);
+        var (id, a, b) = await PendingAsync(h, "user-1", "user-2");
+        await ApplyLockAsync(h, LockEvent(id, a.AdId, b.AdId));
+        h.Clock.Advance(_pendingTimeout * 5);
+
+        Assert.Equal(0, await h.Service.SweepAgreementPendingAsync(default));
+        Assert.Equal(NegotiationStatus.Agreed, await StatusOfAsync(h, id, "user-1"));
+    }
+
+    [Fact]
+    public async Task OpenAnswersLikeAMissingAdForForeignRequesterAdsAndUnpublishedTargets()
+    {
+        if (Create() is not { } h)
+        {
+            return;
+        }
+
+        var foreign = NewAd("user-9");
+        var hiddenTarget = NewAd("user-2", status: AdStatus.Hidden);
+        var publishedTarget = NewAd("user-2");
+        var mine = NewAd("user-1");
+        h.SetAll(foreign, hiddenTarget, publishedTarget, mine);
+        var missing = Guid.NewGuid().ToString();
+
+        var errors = new List<DomainException>
+        {
+            await Assert.ThrowsAsync<DomainException>(() => h.Service.OpenAsync("user-1", missing, publishedTarget.AdId, default)),
+            await Assert.ThrowsAsync<DomainException>(() => h.Service.OpenAsync("user-1", foreign.AdId, publishedTarget.AdId, default)),
+            await Assert.ThrowsAsync<DomainException>(() => h.Service.OpenAsync("user-1", mine.AdId, missing, default)),
+            await Assert.ThrowsAsync<DomainException>(() => h.Service.OpenAsync("user-1", mine.AdId, hiddenTarget.AdId, default)),
+        };
+        Assert.All(errors, e =>
+        {
+            Assert.Equal(DomainError.NotFound, e.Error);
+            Assert.Equal("ad not available", e.Message);
+        });
+    }
+
+    [Fact]
+    public async Task ResponsesCarryBothAdsForThePartiesAndAFailingAdFetchNeverFailsTheCall()
+    {
+        if (Create() is not { } h)
+        {
+            return;
+        }
+
+        var (u1, u2, u3) = (Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), Guid.NewGuid().ToString());
+        var a = NewAd(u1);
+        var b = NewAd(u2);
+        var c = NewAd(u3);
+        h.SetAll(a, b, c);
+
+        var opened = await h.Service.OpenAsync(u1, a.AdId, b.AdId, default);
+        Assert.Equal(a.AdId, opened.RequesterAd?.Id);
+        Assert.Equal(b.AdId, opened.TargetAd?.Id);
+        Assert.Equal("title-" + b.AdId, opened.TargetAd?.Spec.Title);
+        var id = opened.Negotiation.Id;
+        var approved = await h.Service.ApproveAdAsync(u2, id, 1, default);
+        Assert.NotNull(approved.RequesterAd);
+        Assert.NotNull((await h.Service.ApproveProposalAsync(u1, id, 1, default)).TargetAd);
+        Assert.NotNull((await h.Service.CloseAsync(u1, id, default)).RequesterAd);
+
+        // Mapped to the wire message too.
+        var wire = Api.Mapper.ToProto(await h.Service.GetAsync(u2, id, default));
+        Assert.Equal(a.AdId, wire.RequesterAd.Id);
+        Assert.Equal(b.AdId, wire.TargetAd.Id);
+
+        // Only parties: a stranger gets PERMISSION_DENIED and no ad is fetched for them.
+        h.Ads.DetailCalls.Clear();
+        await Assert.ThrowsAsync<DomainException>(() => h.Service.GetAsync(u3, id, default));
+        Assert.Empty(h.Ads.DetailCalls);
+
+        // A list shares one fetch per distinct ad.
+        var d = NewAd(u2);
+        h.SetAll(d);
+        await h.Service.OpenAsync(u1, a.AdId, d.AdId, default);
+        h.Ads.DetailCalls.Clear();
+        var list = await h.Service.ListAsync(u1, null, default);
+        Assert.Equal(2, list.Count);
+        Assert.All(list, v => Assert.NotNull(v.RequesterAd));
+        Assert.Equal(3, h.Ads.DetailCalls.Count); // a, b, d: ad a appears in both negotiations but is fetched once
+        Assert.Equal(3, h.Ads.DetailCalls.Distinct().Count());
+
+        // Ad down for one ad: that field is empty, the rest of the call works.
+        h.Ads.BrokenDetails.Add(b.AdId);
+        var degraded = await h.Service.GetAsync(u1, id, default);
+        Assert.NotNull(degraded.RequesterAd);
+        Assert.Null(degraded.TargetAd);
+        Assert.Equal(NegotiationStatus.Withdrawn, degraded.Negotiation.Status);
+        var degradedList = await h.Service.ListAsync(u1, null, default);
+        Assert.Equal(2, degradedList.Count);
+        var wireDegraded = Api.Mapper.ToProto(degraded);
+        Assert.Null(wireDegraded.TargetAd);
     }
 }

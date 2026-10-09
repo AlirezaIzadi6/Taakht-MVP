@@ -22,6 +22,8 @@ public static class Mapper
             CancelReason = n.CancelReason,
             CreatedAt = Timestamp.FromDateTimeOffset(n.CreatedAt),
             UpdatedAt = Timestamp.FromDateTimeOffset(n.UpdatedAt),
+            RequesterAd = view.RequesterAd,
+            TargetAd = view.TargetAd,
         };
         foreach (var v in n.ApprovalViews(view.Versions))
         {

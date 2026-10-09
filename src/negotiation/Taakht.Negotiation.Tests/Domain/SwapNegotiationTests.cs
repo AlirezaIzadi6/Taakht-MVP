@@ -59,14 +59,22 @@ public class SwapNegotiationTests
     [InlineData(AdStatus.Hidden)]
     [InlineData(AdStatus.Locked)]
     [InlineData(AdStatus.Closed)]
-    public void Open_RequiresTargetPublished(AdStatus status) =>
-        Assert.Equal(DomainError.FailedPrecondition, ErrorOf(() =>
-            SwapNegotiation.Open(Guid.NewGuid(), _requesterAd, _targetAd with { Status = status }, _requester, _now)));
+    public void Open_RequiresTargetPublished_AndAnswersLikeAMissingAd(AdStatus status)
+    {
+        var ex = Assert.Throws<DomainException>(() =>
+            SwapNegotiation.Open(Guid.NewGuid(), _requesterAd, _targetAd with { Status = status }, _requester, _now));
+        Assert.Equal(DomainError.NotFound, ex.Error);
+        Assert.Equal(SwapNegotiation.AdNotAvailable, ex.Message);
+    }
 
     [Fact]
-    public void Open_RequiresCallerToOwnRequesterAd() =>
-        Assert.Equal(DomainError.PermissionDenied, ErrorOf(() =>
-            SwapNegotiation.Open(Guid.NewGuid(), _requesterAd, _targetAd, "user-3", _now)));
+    public void Open_RequiresCallerToOwnRequesterAd_AndAnswersLikeAMissingAd()
+    {
+        var ex = Assert.Throws<DomainException>(() =>
+            SwapNegotiation.Open(Guid.NewGuid(), _requesterAd, _targetAd, "user-3", _now));
+        Assert.Equal(DomainError.NotFound, ex.Error);
+        Assert.Equal(SwapNegotiation.AdNotAvailable, ex.Message);
+    }
 
     [Fact]
     public void Open_RejectsSameOwner() =>
