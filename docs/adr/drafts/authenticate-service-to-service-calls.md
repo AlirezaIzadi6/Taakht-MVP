@@ -19,6 +19,10 @@ Facts that shape the choice (from the gRPC and ASP.NET Core docs):
 
 In phase 1 we will not enforce service identity between services. The internal network is isolated (only Envoy publishes a port), every channel and interceptor is created through a shared library per language so authentication can be added in one place, and the accepted risk is documented in the README limitations. The production target is mutual TLS between services; the mechanism for issuing and rotating certificates (scripted, a service mesh, or SPIFFE/SPIRE) is decided when production topology is decided.
 
+## MVP stance
+
+The MVP does not trust the bare `system:` string any more. The reserved identities `system:swap` and `system:negotiation` are accepted only together with the metadata `x-internal-token`, which must equal the shared secret `INTERNAL_AUTH_TOKEN` (constant-time comparison; local default `dev-internal-token`, DEV ONLY, logged as a warning at startup). The identity interceptors of both platform libs answer `UNAUTHENTICATED` to a `system:` id without a valid token and the client interceptors attach the token on `system:*` calls. Envoy strips a client-sent `x-internal-token` and denies JWTs whose `sub` starts with `system:`. This is a stopgap: one secret for every service, no rotation, plaintext gRPC. It does not replace the decision below.
+
 ## Options considered
 
 1. **Trust the isolated network (phase 1, chosen)** - no cost now and no wasted work, because the shared-library seam keeps the later change small. Risk: a compromised container or an exposed port allows forged identity.

@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_USER: taakht
       POSTGRES_PASSWORD: taakht
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
     volumes:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - pgdata:/var/lib/postgresql/data
@@ -18,7 +18,7 @@ services:
 
   kafka:
     image: apache/kafka:3.9.0
-    ports: ["9094:9094"]
+    ports: ["127.0.0.1:9094:9094"]
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -41,13 +41,13 @@ services:
       retries: 20
 
   envoy:
-    image: envoyproxy/envoy:v1.34-latest
+    image: envoyproxy/envoy:v1.34.14
     command: ["-c", "/etc/envoy/envoy.yaml"]
     volumes:
       - ../gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
       - ../gateway/descriptor.binpb:/etc/envoy/descriptor.binpb:ro
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
       - "127.0.0.1:9901:9901"
     extra_hosts:
       - "host.docker.internal:host-gateway"

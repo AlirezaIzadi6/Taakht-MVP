@@ -62,7 +62,7 @@ proto: ## Regenerate Go code from api/proto (.NET generates at build time via Gr
 		--go-grpc_out=gen/go --go-grpc_opt=paths=source_relative \
 		$$(find api/proto -name '*.proto')
 
-up: ## Start local infrastructure (Postgres, Kafka)
+up: ## Start local infrastructure (Postgres, Kafka, Envoy gateway on :8080)
 	docker compose -f deploy/docker-compose.yml up -d --wait
 
 down: ## Stop local infrastructure and delete its data
@@ -84,7 +84,7 @@ dev-status: ## Show which services are up
 	@scripts/dev.sh status
 
 e2e: ## Run the end-to-end tests in tests/e2e (needs make dev)
-	@if [ -d tests/e2e ]; then cd tests/e2e && E2E=1 go test ./... ; else echo "tests/e2e does not exist yet"; fi
+	@cd tests/e2e && E2E=1 go test -count=1 ./...
 
 scenario: ## Run the scripted demo scenario (needs make dev)
 	@cd tests/e2e && go run ./cmd/scenario
@@ -111,3 +111,18 @@ gateway-descriptor: ## Rebuild gateway/descriptor.binpb (Envoy transcoder) from 
 
 demo: ## Run the narrated REST demo through Envoy (needs make up + scripts/dev.sh start); DEMO_ARGS="--pause" or "timeout"
 	@scripts/demo.sh $(DEMO_ARGS)
+
+# ---------- MVP: fault-injection (chaos) tests ----------
+.PHONY: chaos
+
+chaos: ## Fault-injection tests (kill services, stop Kafka/Postgres); needs make dev, takes ~15-25 min, stops/starts the stack
+	@cd tests/e2e && CHAOS=1 E2E=1 go test -run TestChaos -v -count=1 -timeout 60m ./...
+
+# ---------- MVP: load and stress tests (k6) ----------
+.PHONY: load
+
+load: ## k6 load tests in tests/load (browse, negotiate, contention) with modest defaults; needs make dev and k6; results in tests/load/results
+	@tests/load/gen-tokens.sh
+	@cd tests/load && k6 run -q -e VUS=25 -e DURATION=30s browse.js; \
+	 k6 run -q -e VUS=10 -e DURATION=30s negotiate.js; \
+	 k6 run -q -e REQUESTERS=40 contention.js; true

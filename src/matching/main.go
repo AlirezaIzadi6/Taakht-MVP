@@ -17,6 +17,7 @@ import (
 	matchingv1 "github.com/taakht/taakht/gen/taakht/matching/v1"
 	"github.com/taakht/taakht/libs/goplatform/consume"
 	"github.com/taakht/taakht/libs/goplatform/db"
+	"github.com/taakht/taakht/libs/goplatform/housekeeping"
 	"github.com/taakht/taakht/libs/goplatform/outbox"
 	"github.com/taakht/taakht/libs/goplatform/server"
 	"github.com/taakht/taakht/src/matching/internal/geo"
@@ -61,6 +62,11 @@ func run() error {
 		return err
 	}
 
+	hk, err := housekeeping.OptionsFromEnv()
+	if err != nil {
+		return err
+	}
+
 	h := &handlers.Handlers{Geo: geoMap, Emit: outbox.Add, Log: slog.Default()}
 	svc := &service.Service{DB: pool, Geo: geoMap}
 
@@ -71,6 +77,7 @@ func run() error {
 			return server.Run(gctx, addr, func(s *grpc.Server) { matchingv1.RegisterMatchingServiceServer(s, svc) })
 		},
 		func() error { return outbox.RunRelay(gctx, pool, brokers) },
+		func() error { return housekeeping.Run(gctx, pool, hk) },
 		func() error { return consume.Run(gctx, pool, brokers, "matching", []string{"ad.events"}, h.Map()) },
 	}
 	errs := make(chan error, len(jobs))

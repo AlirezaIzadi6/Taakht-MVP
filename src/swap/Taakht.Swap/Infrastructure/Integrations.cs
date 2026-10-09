@@ -39,10 +39,11 @@ public sealed class GrpcAdClient(AdService.AdServiceClient client) : IAdClient
 
     /// <summary>
     /// Codes that retrying cannot fix: the ads are not lockable (FailedPrecondition, NotFound) or the request itself
-    /// is refused (InvalidArgument, PermissionDenied). Everything else is transient and surfaces for a retry.
+    /// is refused (InvalidArgument). PermissionDenied and Unauthenticated mean a misconfigured internal token, which must
+    /// not reject swaps: they throw and the consumer retries. Everything else is transient and surfaces for a retry.
     /// </summary>
     public static bool IsPermanentRejection(StatusCode code) =>
-        code is StatusCode.FailedPrecondition or StatusCode.NotFound or StatusCode.InvalidArgument or StatusCode.PermissionDenied;
+        code is StatusCode.FailedPrecondition or StatusCode.NotFound or StatusCode.InvalidArgument;
 }
 
 /// <summary>Port to the locker partner (payment status query).</summary>

@@ -173,7 +173,7 @@ func (s *Service) GetAd(ctx context.Context, req *adv1.GetAdRequest) (*adv1.Ad, 
 		version = row.Version
 	}
 	caller := identity.UserID(ctx)
-	if caller != row.OwnerID && !identity.IsSystem(caller) &&
+	if caller != row.OwnerID && !identity.IsSystem(ctx) &&
 		(row.Status != StatusPublished || version != row.Version) {
 		return nil, status.Error(codes.NotFound, "ad not found")
 	}
@@ -220,7 +220,7 @@ func (s *Service) ListMyAds(ctx context.Context, _ *emptypb.Empty) (*adv1.ListMy
 // LockAds atomically claims both ads for a swap, or none. Idempotent by swap_id.
 // Only the swap service (identity system:swap) may call it.
 func (s *Service) LockAds(ctx context.Context, req *adv1.LockAdsRequest) (*emptypb.Empty, error) {
-	if identity.UserID(ctx) != identity.SystemSwap {
+	if identity.UserID(ctx) != identity.SystemSwap || !identity.IsSystem(ctx) {
 		return nil, status.Error(codes.PermissionDenied, "only the swap service can lock ads")
 	}
 	if req.GetSwapId() == "" {

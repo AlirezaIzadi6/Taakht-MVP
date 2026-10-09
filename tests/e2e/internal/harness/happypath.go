@@ -102,8 +102,7 @@ func HappyPath(t TB, c *Clients, say Say) {
 		say("  competing negotiation of %s is CANCELLED (%s)", p.who, lost.GetCancelReason())
 	}
 	u3.WaitNoMatch(adC.GetId(), adA.GetId())
-	u3.WaitNoMatch(adC.GetId(), adB.GetId())
-	say("  the locked ads left the match index: %s no longer sees them as candidates", u3.ID)
+	say("  the locked ad A left the match index: %s no longer sees it as a candidate", u3.ID)
 	Require(t, u3.GetAd(adC.GetId()).GetStatus() == adv1.AdStatus_AD_STATUS_PUBLISHED, "ad of %s must stay PUBLISHED", u3.ID)
 
 	say("Step 8: the locker partner (mock) reports the fees: first %s, then %s.", u2.ID, u1.ID)

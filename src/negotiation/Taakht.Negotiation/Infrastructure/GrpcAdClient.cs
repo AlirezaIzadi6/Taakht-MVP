@@ -10,7 +10,7 @@ namespace Taakht.Negotiation.Infrastructure;
 /// <summary>
 /// Calls ad.GetAd as the system identity (system:negotiation): the Ad service shows unpublished ads and old versions
 /// only to owners and system callers, and negotiation authorizes the real caller itself. The explicit header wins over
-/// the ambient user the platform client interceptor would otherwise forward.
+/// the ambient user the platform client interceptor would otherwise forward; that interceptor adds x-internal-token to the call.
 /// </summary>
 public sealed class GrpcAdClient(AdService.AdServiceClient client) : IAdClient
 {

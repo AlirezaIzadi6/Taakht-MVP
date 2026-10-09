@@ -94,7 +94,7 @@ If steps 1-5 and 7 run from one script, the MVP is done. Step 6 is the first thi
 
 - **Cross-language contracts:** one `.proto` source of truth; a wrong field breaks only at runtime. Mitigation: `buf lint` / `buf breaking` from day 1.
 - **Saga gaps:** lock succeeded but the event to negotiation is lost. Mitigation: outbox plus idempotent consumers; `LockAds` is idempotent by `swap_id`.
-- **Local tooling:** `global.json` pins .NET SDK 10.0.400 (only 8 and 9 are installed on this machine); the README says Go 1.27 (installed: 1.26.3). Fix the version pins on day 1.
+- **Local tooling:** resolved; the machine has Go 1.27.2 and .NET SDK 10.0.401, and `global.json` and `go.work` pins match.
 - **Scope creep from the design docs:** anything not in the flow above waits until after the demo.
 
 ## Status (2026-10-08)
@@ -126,6 +126,6 @@ Not covered by any test: a failure of Kafka or of a service in the middle of the
 | Load test results | Not done; no throughput or latency numbers exist |
 | Fault-injection tests (Kafka or a service down mid-saga) | Not done |
 | Deployment beyond the local host (containers for the services, a real identity provider, service-to-service authentication) | Not done; services run as host processes, the gateway uses a static dev key |
-| Repair for stuck `AGREEMENT_PENDING` / `LOCKING`, DLQ, pruning of `outbox` and `processed_events`, clearing `notified_pair` | Not done; listed in the architecture document's known gaps |
+| Repair for stuck `AGREEMENT_PENDING` / `LOCKING`, DLQ, clearing `notified_pair` | Not done; listed in the architecture document's known gaps |
 | Enforcing that user ids never start with `system:` | Not done (token issuer); see the architecture document |
 | Recorded learnings (ADR notes) | Five drafts written ([outbox](../adr/drafts/use-a-transactional-outbox-for-events.md), [idempotent consumers](../adr/drafts/make-consumers-idempotent-with-a-processed-events-table.md), [ad lock](../adr/drafts/take-the-exclusive-ad-lock-in-the-ad-service.md), [Negotiation/Swap split](../adr/drafts/keep-negotiation-and-swap-as-separate-services.md), [versioned approvals](../adr/drafts/bind-approvals-to-versions.md)); none accepted yet |

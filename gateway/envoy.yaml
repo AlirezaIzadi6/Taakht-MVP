@@ -31,6 +31,10 @@ static_resources:
                   virtual_hosts:
                     - name: all
                       domains: ["*"]
+                      # Defence in depth: the internal secret must never reach a service from the edge (the lua
+                      # filter below already strips it before authentication). Route-level removal runs in the
+                      # router, after jwt_authn, so it cannot be used for x-user-id.
+                      request_headers_to_remove: ["x-internal-token"]
                       routes:
                         - match: { path: "/healthz" }
                           direct_response: { status: 200, body: { inline_string: "ok" } }
@@ -46,6 +50,18 @@ static_resources:
                         - match: { prefix: "/v1/dev/swaps/" }
                           route: { cluster: swap_service }
                 http_filters:
+                  # First: drop client-supplied identity headers BEFORE jwt_authn. claim_to_headers only
+                  # overwrites x-user-id when the token has a `sub`, so a signed token without `sub` would
+                  # otherwise keep a client-chosen x-user-id.
+                  - name: envoy.filters.http.lua
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                      default_source_code:
+                        inline_string: |
+                          function envoy_on_request(handle)
+                            handle:headers():remove("x-user-id")
+                            handle:headers():remove("x-internal-token")
+                          end
                   # Every /v1/ route requires a valid JWT. On success the `sub` claim
                   # is written to x-user-id, replacing any value the client sent.
                   - name: envoy.filters.http.jwt_authn
@@ -54,6 +70,7 @@ static_resources:
                       providers:
                         dev:
                           issuer: taakht-dev
+                          audiences: ["taakht-api"]
                           claim_to_headers:
                             - header_name: x-user-id
                               claim_name: sub
@@ -63,6 +80,27 @@ static_resources:
                       rules:
                         - match: { prefix: "/v1/" }
                           requires: { provider_name: dev }
+                  # jwt_authn cannot filter claims by prefix, so check the x-user-id header it just wrote:
+                  # deny a `system:` subject (case-insensitive; system identities are for service-to-service
+                  # calls only) and deny a /v1/ request that ended up with no x-user-id (token without `sub`).
+                  - name: envoy.filters.http.rbac
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+                      rules:
+                        action: DENY
+                        policies:
+                          no_system_subject:
+                            permissions: [{ any: true }]
+                            principals:
+                              - header:
+                                  name: x-user-id
+                                  string_match: { prefix: "system:", ignore_case: true }
+                          missing_subject:
+                            permissions:
+                              - url_path: { path: { prefix: "/v1/" } }
+                            principals:
+                              - not_id:
+                                  header: { name: x-user-id, present_match: true }
                   - name: envoy.filters.http.grpc_json_transcoder
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.grpc_json_transcoder.v3.GrpcJsonTranscoder

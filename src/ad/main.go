@@ -12,6 +12,7 @@ import (
 	adv1 "github.com/taakht/taakht/gen/taakht/ad/v1"
 	"github.com/taakht/taakht/libs/goplatform/consume"
 	"github.com/taakht/taakht/libs/goplatform/db"
+	"github.com/taakht/taakht/libs/goplatform/housekeeping"
 	"github.com/taakht/taakht/libs/goplatform/outbox"
 	"github.com/taakht/taakht/libs/goplatform/server"
 	"github.com/taakht/taakht/src/ad/internal/ad"
@@ -50,12 +51,18 @@ func run() error {
 		return err
 	}
 
+	hk, err := housekeeping.OptionsFromEnv()
+	if err != nil {
+		return err
+	}
+
 	svc := ad.NewService(pool, elig)
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		return server.Run(ctx, addr, func(s *grpc.Server) { adv1.RegisterAdServiceServer(s, svc) })
 	})
 	g.Go(func() error { return outbox.RunRelay(ctx, pool, brokers) })
+	g.Go(func() error { return housekeeping.Run(ctx, pool, hk) })
 	g.Go(func() error {
 		return consume.Run(ctx, pool, brokers, ad.Group, []string{ad.SwapTopic}, ad.Handlers())
 	})

@@ -22,6 +22,7 @@ func Run(ctx context.Context, addr string, register func(*grpc.Server)) error {
 	if err != nil {
 		return fmt.Errorf("server: listen %s: %w", addr, err)
 	}
+	identity.WarnIfDefaultToken()
 	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(identity.ServerInterceptor()))
 	register(srv)
 	if os.Getenv("TAAKHT_GRPC_REFLECTION") == "on" {

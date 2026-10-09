@@ -33,9 +33,19 @@ func setup(t *testing.T, services ...string) *harness.Clients {
 	return c
 }
 
+// requireLongDeadline skips tests that need the default (long) payment deadline; they would
+// race the swap timeout when swap runs with PAYMENT_DEADLINE=5s (E2E_SHORT_DEADLINE=1).
+func requireLongDeadline(t *testing.T) {
+	t.Helper()
+	if os.Getenv("E2E_SHORT_DEADLINE") == "1" {
+		t.Skip("E2E_SHORT_DEADLINE=1: this test needs the long payment deadline")
+	}
+}
+
 func allServices() []string { return []string{"ad", "matching", "negotiation", "swap"} }
 
 func TestAdMatchingOnly(t *testing.T) {
+	requireLongDeadline(t)
 	c := setup(t, "ad", "matching")
 	u1, u2, u3 := harness.NewActor(t, c, harness.User1), harness.NewActor(t, c, harness.User2), harness.NewActor(t, c, harness.User3)
 
@@ -70,6 +80,7 @@ func TestAdMatchingOnly(t *testing.T) {
 }
 
 func TestHappyPath(t *testing.T) {
+	requireLongDeadline(t)
 	c := setup(t, allServices()...)
 	harness.HappyPath(t, c, t.Logf)
 }
@@ -113,6 +124,7 @@ func TestPaymentTimeout(t *testing.T) {
 
 // Two negotiations on the same ad both reach full agreement at the same moment: exactly one lock wins.
 func TestLockRace(t *testing.T) {
+	requireLongDeadline(t)
 	c := setup(t, allServices()...)
 	u1, u2, u3 := harness.NewActor(t, c, harness.User1), harness.NewActor(t, c, harness.User2), harness.NewActor(t, c, harness.User3)
 
@@ -197,6 +209,7 @@ func TestLockRace(t *testing.T) {
 
 // A user the locker partner does not accept (user-4) cannot be put on a locker leg.
 func TestLockerEligibility(t *testing.T) {
+	requireLongDeadline(t)
 	c := setup(t, "ad", "negotiation")
 	u1, u4 := harness.NewActor(t, c, harness.User1), harness.NewActor(t, c, harness.User4)
 

@@ -68,3 +68,6 @@ tmp/
 
 # Local dev runtime (scripts/dev.sh): binaries, pids, logs
 .run/
+
+# k6 load tests
+tests/load/.tokens.json

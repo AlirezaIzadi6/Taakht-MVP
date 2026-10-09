@@ -11,6 +11,9 @@ Install these yourself. `make setup` only checks that they exist, it never insta
 | Git | |
 | .NET SDK | Version pinned in [`global.json`](../global.json). If it is missing, `dotnet` commands fail with a message naming the required version. |
 | Go | Version comes from each module's `go.mod`. Go downloads the matching toolchain automatically, so any recent Go is enough to bootstrap. |
+| Docker | Needed by `make up` / `make dev` (Postgres, Kafka, Envoy). |
+| jq | Needed by `make demo` (also `curl`). |
+| grpcurl | Optional, for manual gRPC calls. |
 | make | Linux/macOS: preinstalled or via the package manager. Windows: `scoop install make` or `choco install make`, and run it from Git Bash because the Makefile uses `bash` and `find`. |
 
 ## Setup

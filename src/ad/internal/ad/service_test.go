@@ -68,9 +68,29 @@ func newTestService(t *testing.T) (*Service, *pgxpool.Pool) {
 	return NewService(pool, testElig), pool
 }
 
+// as builds the context the identity interceptor would produce; system ids carry the internal token.
 func as(user string) context.Context {
+	md := metadata.Pairs(identity.Header, user)
+	if identity.IsSystemID(user) {
+		md.Set(identity.TokenHeader, identity.InternalToken())
+	}
+	return identity.WithUserID(metadata.NewIncomingContext(context.Background(), md), user)
+}
+
+// asWithoutToken is a bare system id with no proof (what the interceptor refuses before any handler runs).
+func asWithoutToken(user string) context.Context {
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(identity.Header, user))
 	return identity.WithUserID(ctx, user)
+}
+
+func TestSystemIdentityWithoutTokenIsNotSystem(t *testing.T) {
+	s, _ := newTestService(t)
+	a := mustCreate(t, s, "user-1", "a")
+	b := mustCreate(t, s, "user-2", "b")
+	_, err := s.LockAds(asWithoutToken(identity.SystemSwap), lockReq("s-notoken", a, b, 1, 1))
+	wantCode(t, err, codes.PermissionDenied)
+	_, err = s.GetAd(asWithoutToken(identity.SystemNegotiation), &adv1.GetAdRequest{AdId: a.Id})
+	wantCode(t, err, codes.NotFound)
 }
 
 func spec(title string) *adv1.AdSpec {

@@ -12,10 +12,14 @@ PIDS="$RUN/pids"
 LOGS="$RUN/logs"
 mkdir -p "$BIN" "$PIDS" "$LOGS"
 
-export PATH="$PATH:/c/Users/USER/go/bin:/c/Program Files/Go/bin:/c/Program Files/dotnet"
-for d in /c/Users/USER/AppData/Local/Microsoft/WinGet/Packages/ezwinports.make_*/bin; do
-  [ -d "$d" ] && PATH="$PATH:$d"
-done
+# Tool locations are derived from $HOME / $LOCALAPPDATA instead of a hard-coded user; only existing dirs are added.
+add_path() { [ -d "$1" ] && case ":$PATH:" in *":$1:"*) ;; *) PATH="$PATH:$1" ;; esac; }
+LOCALAPPS="$(cygpath -u "${LOCALAPPDATA:-$HOME/AppData/Local}" 2>/dev/null || echo "$HOME/AppData/Local")"
+add_path "$HOME/go/bin"
+add_path "/c/Program Files/Go/bin"
+add_path "/c/Program Files/dotnet"
+for d in "$LOCALAPPS"/Microsoft/WinGet/Packages/ezwinports.make_*/bin; do add_path "$d"; done
+export PATH
 
 SERVICES=(ad matching negotiation swap)
 declare -A PORT=([ad]=9001 [matching]=9002 [negotiation]=9003 [swap]=9004)
@@ -57,6 +61,19 @@ listeners() {
     awk -v p=":$1" '$1=="TCP" && $4=="LISTENING" && substr($2, length($2)-length(p)+1)==p {print $5}' | sort -u
 }
 
+# True when Windows PID $1 belongs to this checkout: it is the pid-file process, or its command line
+# runs something from this checkout's .run/bin (the Go exe or the dotnet dll).
+owned_pid() {
+  local want cl
+  want="$(svc_pid "$2")"
+  [ -n "$want" ] && [ "$1" = "$want" ] && return 0
+  cl="$(powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=$1').CommandLine" 2>/dev/null | tr -d '\r')"
+  [ -n "$cl" ] || return 1
+  cl="$(printf '%s' "$cl" | tr 'A-Z' 'a-z' | tr '/' '\\')"
+  case "$cl" in *"$(cygpath -w "$BIN" | tr 'A-Z' 'a-z' | tr '/' '\\')"*) return 0 ;; esac
+  return 1
+}
+
 pidfile() { echo "$PIDS/$1.pid"; }
 svc_pid() { [ -f "$(pidfile "$1")" ] && cat "$(pidfile "$1")"; }
 pid_alive() { [ -n "${1:-}" ] && tasklist //FI "PID eq $1" //NH 2>/dev/null | grep -q " $1 "; }
@@ -89,6 +106,7 @@ run_svc() {
   export DATABASE_URL="${DB_BASE}/$s?sslmode=disable" KAFKA_BROKERS GRPC_ADDR=":$p" AD_ADDR="${AD_ADDR:-localhost:9001}"
   export ELIGIBILITY_FILE="${ELIGIBILITY_FILE:-$WROOT/config/eligibility.json}"
   export PAYMENT_DEADLINE TAAKHT_GRPC_REFLECTION="${TAAKHT_GRPC_REFLECTION:-on}"
+  export INTERNAL_AUTH_TOKEN="${INTERNAL_AUTH_TOKEN:-dev-internal-token}" # DEV ONLY default; proves system: callers
   export ConnectionStrings__Default="${DB_BASE}/$s?sslmode=disable"
   export ASPNETCORE_ENVIRONMENT=Development DOTNET_ENVIRONMENT=Development
   local wdir cmdline
@@ -135,7 +153,14 @@ stop_svc() {
   local s="$1" p="${PORT[$1]}" pid l i
   pid="$(svc_pid "$s")"
   if [ -n "$pid" ] && pid_alive "$pid"; then kill_tree "$pid"; fi
-  for l in $(listeners "$p"); do kill_tree "$l"; done # strays not tracked by a pid file
+  # Strays (e.g. children that outlived the wrapper): only kill ones that belong to this checkout.
+  for l in $(listeners "$p"); do
+    if owned_pid "$l" "$s" || [ "${FORCE:-0}" = 1 ]; then
+      kill_tree "$l"
+    else
+      warn "$s: port $p is held by pid $l, which is not from this checkout; not killing it (FORCE=1 to override)"
+    fi
+  done
   rm -f "$(pidfile "$s")"
   for i in 1 2 3 4 5 6 7 8 9 10; do
     if [ -z "$(listeners "$p")" ]; then

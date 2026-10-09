@@ -13,12 +13,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
 const (
 	secret = "taakht-dev-secret-0123456789abcdef"
 	issuer = "taakht-dev"
+	// audience must match the jwt_authn provider's audiences in gateway/envoy.yaml.
+	audience = "taakht-api"
 )
 
 func main() {
@@ -26,10 +29,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: devtoken <user-id>   (seed users: user-1 .. user-4)")
 		os.Exit(2)
 	}
+	if strings.HasPrefix(os.Args[1], "system:") {
+		fmt.Fprintln(os.Stderr, "devtoken: the system: prefix is reserved for services and is never minted")
+		os.Exit(2)
+	}
 	enc := base64.RawURLEncoding
 	header, _ := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})
 	claims, _ := json.Marshal(map[string]any{
 		"iss": issuer,
+		"aud": audience,
 		"sub": os.Args[1],
 		"iat": time.Now().Unix(),
 		"exp": time.Now().Add(24 * time.Hour).Unix(),

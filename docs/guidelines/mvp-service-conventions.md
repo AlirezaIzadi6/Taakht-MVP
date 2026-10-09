@@ -33,8 +33,8 @@ Environment variables (with these defaults for local runs): `DATABASE_URL=postgr
 ## Identity
 
 - The caller is the gRPC metadata key `x-user-id`. A shared interceptor reads it; a missing value is `UNAUTHENTICATED`.
-- A valid id has 1..64 characters and no control characters; otherwise `UNAUTHENTICATED`.
-- Outgoing service-to-service calls forward the same `x-user-id`, except calls made on behalf of the system: Swap calls `LockAds` as `system:swap` and Negotiation calls `GetAd` as `system:negotiation`. The prefix `system:` is reserved; real user ids must never start with it (see [API conventions](api-conventions.md)).
+- A valid id is an opaque token of 1..64 printable ASCII bytes (0x21-0x7E: no spaces, control characters or non-ASCII), identical in the Go and .NET libs; a repeated `x-user-id` or `x-internal-token` header is rejected too; anything else is `UNAUTHENTICATED`.
+- Outgoing service-to-service calls forward the same `x-user-id`, except calls made on behalf of the system: Swap calls `LockAds` as `system:swap` and Negotiation calls `GetAd` as `system:negotiation`. The prefix `system:` is reserved; real user ids must never start with it, and a `system:` id is accepted only with the `x-internal-token` secret, which the platform client interceptors add (see [API conventions](api-conventions.md)).
 - Seed users: `user-1` .. `user-4`. Envoy sets the header from the JWT `sub`; services never validate tokens.
 
 ## Errors (gRPC status codes)
@@ -82,6 +82,16 @@ CREATE TABLE processed_events (
 If `INSERT ... ON CONFLICT DO NOTHING` inserts nothing, the event was already handled: skip. A handler that fails returns an error; the message is retried (log + retry with backoff; no DLQ in the MVP). An error that retrying cannot fix is wrapped as permanent (`consume.Permanent` in Go, `PermanentEventException` in .NET; decode failures are permanent automatically): the event is logged, recorded in `processed_events` and skipped. Handlers must also be safe against re-ordering across topics (check state, not just event arrival).
 
 Consumer groups are named after the service (`ad`, `matching`, `negotiation`, `swap`); start from the earliest offset.
+
+**Housekeeping.** `outbox` and `processed_events` are pruned by a background job every service runs (Go: `housekeeping.Run` in `libs/goplatform/housekeeping`, wired in `main.go`; .NET: `AddTaakhtHousekeeping()`, a `BackgroundService`). It runs once about 30 s after startup and then every `PRUNE_INTERVAL`, deletes in batches of 1000 rows per statement until nothing is left, logs at info only when it deleted something, and never deletes unpublished outbox rows. Each service ships a `00N_housekeeping_indexes.sql` migration with the supporting indexes.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `OUTBOX_RETENTION` | `24h` | Published outbox rows older than this (by `published_at`) are deleted. |
+| `PROCESSED_EVENTS_RETENTION` | `7d` | `processed_events` rows older than this (by `processed_at`) are deleted. |
+| `PRUNE_INTERVAL` | `10m` | Time between sweeps. |
+
+Durations accept the usual units (`90s`, `10m`, `24h`) and a `d` suffix (`7d`, `1d12h`); anything below `1m` or unparseable fails startup. Tradeoff: deleting a `processed_events` row ends the idempotency guarantee for that event, so a redelivery after the retention would run the handler again. Keep `PROCESSED_EVENTS_RETENTION` much larger than any realistic redelivery window (Kafka topic retention, consumer-group offset resets, manual replays); lowering it saves space at the cost of weaker deduplication.
 
 ## Shared helper API
 

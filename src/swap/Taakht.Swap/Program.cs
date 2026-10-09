@@ -25,6 +25,7 @@ var paymentDeadline = DurationParser.Parse(config["PAYMENT_DEADLINE"] ?? "1h");
 
 builder.Services.AddTaakhtPlatform(config);
 builder.Services.AddTaakhtOutboxRelay();
+builder.Services.AddTaakhtHousekeeping();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new SwapOptions(paymentDeadline));
 builder.Services.AddSingleton(new SwapApiOptions(

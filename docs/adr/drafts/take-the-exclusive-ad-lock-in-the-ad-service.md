@@ -11,7 +11,7 @@ When two parties agree to swap, both ads must become unavailable to every other 
 
 ## Decision
 
-We will take the lock in the Ad service, which owns the ad rows: `LockAds(swap_id, [(ad_id, version)] x2)` claims both ads in one database transaction, or neither. It is idempotent by `swap_id`. `LockAds` accepts only the service identity `system:swap`. The Swap service drives it as a saga step after `AgreementReached`; the Ad service releases or closes the ads when it consumes `SwapCancelled` or `SwapCompleted`.
+We will take the lock in the Ad service, which owns the ad rows: `LockAds(swap_id, [(ad_id, version)] x2)` claims both ads in one database transaction, or neither. It is idempotent by `swap_id`. `LockAds` accepts only the service identity `system:swap`, proven by the shared internal token (`x-internal-token`). The Swap service drives it as a saga step after `AgreementReached`; the Ad service releases or closes the ads when it consumes `SwapCancelled` or `SwapCompleted`.
 
 ## Options considered
 
@@ -32,7 +32,7 @@ We will take the lock in the Ad service, which owns the ad rows: `LockAds(swap_i
 - Implemented with `SELECT ... FOR UPDATE` on both ad rows plus checks in code, not the single conditional `UPDATE` that the plan describes. The guarantee is the same.
 - Stuck negotiations: nothing times out `AGREEMENT_PENDING`, and nothing reconciles a swap that stays `LOCKING` other than redelivery of `AgreementReached`.
 - Negotiation consumes `SwapCancelled` and cancels the `AGREED` negotiation of that ad pair (found by ad ids). It does not consume `SwapCompleted`, so a completed swap leaves it `AGREED`. Competitors cancelled at lock time stay cancelled.
-- The caller check on `LockAds` trusts the `x-user-id` string `system:swap`. It protects against ordinary users only if ports are not reachable by clients and no real user id starts with `system:`; there is no cryptographic service identity (see [authenticate service-to-service calls](authenticate-service-to-service-calls.md)).
+- The caller check on `LockAds` requires `x-user-id: system:swap` together with the shared `INTERNAL_AUTH_TOKEN` (`x-internal-token`); a bare `system:swap` is `UNAUTHENTICATED`. It is one secret for all services, not a per-service cryptographic identity (see [authenticate service-to-service calls](authenticate-service-to-service-calls.md)).
 - Consistency between the lock and the search index is eventual: Matching removes an ad when `AdLocked` arrives, so a locked ad can briefly appear in `Search` results. A user acting on such a result is stopped at `OpenNegotiation` (the target must be published) or at `LockAds`.
 - Only overlapping swaps in one process were tested (concurrent goroutines); there is no multi-process load test.
 

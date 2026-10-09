@@ -30,6 +30,7 @@ builder.WebHost.ConfigureKestrel(kestrel =>
 
 builder.Services.AddTaakhtPlatform(config);
 builder.Services.AddTaakhtOutboxRelay();
+builder.Services.AddTaakhtHousekeeping();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new NegotiationOptions(cap));
 builder.Services.AddSingleton<ILockerEligibility, MockLockerEligibility>();

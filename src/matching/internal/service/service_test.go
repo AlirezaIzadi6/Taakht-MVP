@@ -78,3 +78,32 @@ func TestSearchAndFindMatches(t *testing.T) {
 		t.Fatalf("limit not applied: %v %v", all, err)
 	}
 }
+
+func TestCandidatesBoundedAndRecentFirst(t *testing.T) {
+	pool := testdb.New(t)
+	svc := &service.Service{DB: pool, Geo: geo.Map{"n1": {ID: "n1", Lat: 35.72, Lon: 51.41}}}
+	total := index.MaxCandidates + 20
+	var newest string
+	for i := 0; i < total; i++ {
+		newest = put(t, svc, "user-"+uuid.NewString(), "tools", []string{"n1"})
+	}
+	got, err := index.Candidates(context.Background(), svc.DB, index.Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != index.MaxCandidates {
+		t.Fatalf("expected %d candidates, got %d", index.MaxCandidates, len(got))
+	}
+	if got[0].GetId() != newest {
+		t.Fatalf("most recently updated ad should come first: got %s want %s", got[0].GetId(), newest)
+	}
+
+	// Equal scores: the freshest ad wins the single slot, every time.
+	ctx := identity.WithUserID(context.Background(), "user-me")
+	for i := 0; i < 3; i++ {
+		res, err := svc.Search(ctx, &matchingv1.SearchRequest{Limit: 1})
+		if err != nil || len(res.Candidates) != 1 || res.Candidates[0].Ad.Id != newest {
+			t.Fatalf("tie-break not deterministic: %v %v", res, err)
+		}
+	}
+}

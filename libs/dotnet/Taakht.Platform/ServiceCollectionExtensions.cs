@@ -27,12 +27,24 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(new KafkaOptions(brokers));
         services.AddSingleton<ServerIdentityInterceptor>();
         services.AddSingleton<ClientIdentityInterceptor>();
+        services.AddHostedService<InternalAuthWarning>();
         return services;
     }
 
     /// <summary>Adds the outbox relay hosted service.</summary>
     public static IServiceCollection AddTaakhtOutboxRelay(this IServiceCollection services)
         => services.AddHostedService<OutboxRelay>();
+
+    /// <summary>
+    /// Adds the housekeeping hosted service that prunes published outbox rows and old processed_events rows.
+    /// Configured by OUTBOX_RETENTION (24h), PROCESSED_EVENTS_RETENTION (7d) and PRUNE_INTERVAL (10m); an invalid value
+    /// fails host startup.
+    /// </summary>
+    public static IServiceCollection AddTaakhtHousekeeping(this IServiceCollection services)
+    {
+        services.AddSingleton(sp => HousekeepingOptions.FromConfiguration(sp.GetRequiredService<IConfiguration>()));
+        return services.AddHostedService<HousekeepingService>();
+    }
 
     /// <summary>Adds an event consumer hosted service. Handlers are keyed by envelope type (full proto name).</summary>
     public static IServiceCollection AddTaakhtEventConsumer(

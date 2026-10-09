@@ -25,7 +25,8 @@ We will write every event into an `outbox` table in the same database transactio
 
 - Positive: a committed change always has its event recorded; Kafka outages delay events but do not break writes; the outbox rows are an inspectable record of what was published.
 - Negative / trade-offs we accept: at-least-once delivery (consumers must be idempotent, see [processed events](make-consumers-idempotent-with-a-processed-events-table.md)); 200 ms polling latency per hop (the lock saga crosses three hops); extra writes and storage.
-- Follow-ups: pruning of published rows; revisit CDC when polling load or latency matters.
+- Published rows are pruned after `OUTBOX_RETENTION` (default 24h) by the housekeeping job; unpublished rows are never deleted.
+- Follow-ups: revisit CDC when polling load or latency matters.
 
 ## Known gaps
 

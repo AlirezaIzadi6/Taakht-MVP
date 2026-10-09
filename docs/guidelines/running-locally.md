@@ -30,8 +30,21 @@ Settings you can override through the environment: `PAYMENT_DEADLINE` (swap lock
 | matching | `localhost:9002` | `matching` |
 | negotiation | `localhost:9003` | `negotiation` |
 | swap | `localhost:9004` | `swap` |
+| Envoy gateway (REST + JWT) | `http://localhost:8080` | - |
 
-Postgres is on `localhost:5432` (user and password `taakht`), Kafka on `localhost:9094`.
+Postgres is on `localhost:5432` (user and password `taakht`), Kafka on `localhost:9094`. Envoy is started by `make up` together with them. Postgres, Kafka and Envoy's public port 8080 are published on loopback only (`127.0.0.1`), so they are not reachable from other machines on your network.
+
+## Demo and tests
+
+```bash
+make demo       # narrated REST demo through Envoy (:8080); needs make up + scripts/dev.sh start; DEMO_ARGS="--pause" to step through
+make e2e        # end-to-end Go tests in tests/e2e; needs make dev
+make scenario   # scripted demo scenario over gRPC; needs make dev
+```
+
+`make demo` additionally needs `jq` and `curl` on `PATH`.
+
+The e2e tests have two modes (see `tests/e2e/README.md`). By default swap runs with the long payment deadline and `TestPaymentTimeout` is skipped. For the timeout test, start swap with `PAYMENT_DEADLINE=5s` and run `E2E_SHORT_DEADLINE=1 make e2e`; in that mode only `TestPaymentTimeout` runs and the other tests skip themselves.
 
 ## Where things are
 
@@ -45,7 +58,7 @@ Everything generated lives in the git-ignored `.run/` directory:
 
 ## Calling a service
 
-gRPC reflection is enabled by `scripts/dev.sh` (`TAAKHT_GRPC_REFLECTION=on` for the Go services, the Development environment for the .NET ones); it is off by default elsewhere, so use `-proto`/`-import-path` there. Every call needs the caller in `x-user-id` (seed users `user-1` .. `user-4`).
+gRPC reflection is enabled by `scripts/dev.sh` (`TAAKHT_GRPC_REFLECTION=on` for the Go services, the Development environment for the .NET ones); it is off by default elsewhere, so use `-proto`/`-import-path` there. Every call needs the caller in `x-user-id` (seed users `user-1` .. `user-4`). The internal identities `system:swap` and `system:negotiation` additionally need `-H 'x-internal-token: $INTERNAL_AUTH_TOKEN'`; `scripts/dev.sh` exports `INTERNAL_AUTH_TOKEN` to all four services (default `dev-internal-token`, DEV ONLY; each service logs a warning while the default is in use). Without the token such a call is `UNAUTHENTICATED`.
 
 ```bash
 grpcurl -plaintext localhost:9001 list                                   # services

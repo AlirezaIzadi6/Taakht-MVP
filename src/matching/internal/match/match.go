@@ -49,12 +49,11 @@ func RankBrowse(g geo.Map, crit scoring.Criteria, cands []*adv1.Ad, limit int) [
 	return top(out, limit)
 }
 
+// top orders by score; equal scores keep the input order, which index.Candidates
+// delivers most recently updated first, so ties are deterministic and favor fresh ads.
 func top(s []Scored, limit int) []Scored {
-	slices.SortFunc(s, func(a, b Scored) int {
-		if c := cmp.Compare(b.Score, a.Score); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Ad.GetId(), b.Ad.GetId())
+	slices.SortStableFunc(s, func(a, b Scored) int {
+		return cmp.Compare(b.Score, a.Score)
 	})
 	if limit > 0 && len(s) > limit {
 		s = s[:limit]

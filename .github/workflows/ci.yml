@@ -42,6 +42,11 @@ jobs:
               - '**/*.slnx'
               - 'global.json'
               - '.editorconfig'
+              - '**/*.proto'
+              - '**/*.sql'
+              - 'api/**'
+              - 'third_party/**'
+              - 'config/**'
               - '.github/workflows/ci.yml'
             go:
               - '**/*.go'
@@ -49,6 +54,14 @@ jobs:
               - '**/go.sum'
               - 'go.work'
               - '.golangci.yml'
+              - '**/*.proto'
+              - '**/*.sql'
+              - 'config/**'
+              - 'api/**'
+              - 'gen/**'
+              - 'third_party/**'
+              - 'scripts/**'
+              - 'gateway/**'
               - '.github/workflows/ci.yml'
             e2e:
               - 'src/**'
@@ -252,6 +265,7 @@ jobs:
       DB_BASE: postgres://taakht:taakht@localhost:5432
       KAFKA_BROKERS: localhost:9094
       PGPASSWORD: taakht
+      INTERNAL_AUTH_TOKEN: dev-internal-token # DEV ONLY; same default as scripts/dev.sh
     steps:
       - uses: actions/checkout@v4
 
@@ -354,7 +368,7 @@ jobs:
   # e2e is intentionally not in `needs`: it is informational only.
   ci-ok:
     if: always()
-    needs: [pr-title, dotnet, go]
+    needs: [changes, pr-title, dotnet, go]
     runs-on: ubuntu-latest
     steps:
       - name: Verify results

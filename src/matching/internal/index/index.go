@@ -75,7 +75,12 @@ type Filter struct {
 	NeighborhoodIDs []string // candidate neighborhoods must overlap
 }
 
-// Candidates returns published indexed ads that pass the filter.
+// MaxCandidates bounds how many rows one scan reads and unmarshals before scoring.
+const MaxCandidates = 1000
+
+// Candidates returns up to MaxCandidates published indexed ads that pass the
+// filter, most recently updated first (ties by ad_id), so the bound drops the
+// oldest ads deterministically.
 func Candidates(ctx context.Context, q Querier, f Filter) ([]*adv1.Ad, error) {
 	rows, err := q.Query(ctx, `
 SELECT snapshot FROM ad_index
@@ -85,8 +90,9 @@ WHERE status = 'AD_STATUS_PUBLISHED'
   AND (cardinality($3::text[]) = 0 OR have_category = ANY($3))
   AND ($4 = '' OR cardinality(want_categories) = 0 OR $4 = ANY(want_categories))
   AND (cardinality($5::text[]) = 0 OR neighborhood_ids && $5)
-ORDER BY ad_id`,
-		f.ExcludeOwner, f.ExcludeAdID, nonNil(f.HaveCategories), f.WantsCategory, nonNil(f.NeighborhoodIDs))
+ORDER BY updated_at DESC, ad_id
+LIMIT $6`,
+		f.ExcludeOwner, f.ExcludeAdID, nonNil(f.HaveCategories), f.WantsCategory, nonNil(f.NeighborhoodIDs), MaxCandidates)
 	if err != nil {
 		return nil, err
 	}

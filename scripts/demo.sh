@@ -76,13 +76,16 @@ if [ -z "$TOKBIN" ]; then
   done
 fi
 
+# One token per demo user, generated once up front (token() runs in command substitutions, so a
+# lazily filled cache would be lost with each subshell and devtoken would be forked per request).
 declare -A TOKEN
-token() {
-  if [ -z "${TOKEN[$1]:-}" ]; then
-    TOKEN[$1]="$("$TOKBIN" "$1" | tr -d '\r')" || fail "devtoken failed for $1"
-  fi
-  printf '%s' "${TOKEN[$1]}"
-}
+for u in user-1 user-2 user-3 user-4; do
+  tok="$("$TOKBIN" "$u")" || fail "devtoken failed for $u"
+  tok="$(printf '%s' "$tok" | tr -d '\r')"
+  [ -n "$tok" ] || fail "devtoken printed no token for $u"
+  TOKEN[$u]="$tok"
+done
+token() { printf '%s' "${TOKEN[$1]:?no token for $1}"; }
 
 # ---------- output helpers ----------
 STEP=0
@@ -105,7 +108,8 @@ RESP=""
 CODE=""
 # call USER METHOD PATH [JSON_BODY] [EXPECTED_HTTP_STATUS=200]
 # Prints "METHOD path", stores the body in $RESP, fails the demo on an unexpected status.
-# Connection errors and 503 (stack restarting) are retried a few times.
+# Connection failures (curl code 000, nothing received) are retried a few times; 502/503/504 only for GET,
+# because a POST may already have taken effect and must not be replayed.
 call() {
   local user="$1" method="$2" path="$3" body="${4:-}" want="${5:-200}" quiet="${QUIET:-0}"
   [ "$quiet" = 1 ] || echo "   ${YEL}${user}${RST} ${B}${method} ${path}${RST}"
@@ -120,7 +124,11 @@ call() {
       CODE="$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" "$GATEWAY$path" \
         -H "Authorization: Bearer $(token "$user")" 2>/dev/null)"
     fi
-    case "$CODE" in 000 | 502 | 503 | 504) sleep 2 ;; *) break ;; esac
+    case "$CODE" in
+      000) sleep 2 ;;
+      502 | 503 | 504) if [ "$method" = GET ]; then sleep 2; else break; fi ;;
+      *) break ;;
+    esac
   done
   RESP="$(cat "$tmp")"
   rm -f "$tmp"
@@ -155,19 +163,35 @@ poll() {
 }
 
 # ---------- cleanup ----------
+# soft_call USER METHOD PATH: one best-effort request that never exits the script (used by cleanup).
+# Retries a few times on connection failure only; returns 0 on HTTP 2xx and leaves the body in $RESP.
+soft_call() {
+  local tmp attempt
+  tmp="$(mktemp)"
+  for attempt in 1 2 3; do
+    CODE="$(curl -sS -m 10 -o "$tmp" -w '%{http_code}' -X "$2" "$GATEWAY$3"       -H "Authorization: Bearer $(token "$1")" -H 'Content-Type: application/json'       ${4:+-d "$4"} 2>/dev/null)" || CODE=000
+    [ "$CODE" = 000 ] && { sleep 1; continue; }
+    break
+  done
+  RESP="$(cat "$tmp")"
+  rm -f "$tmp"
+  case "$CODE" in 2??) return 0 ;; *) return 1 ;; esac
+}
+
 CREATED=() # "owner:adId"
 cleanup() {
-  local rc=$? e owner id hid=0
+  local rc=$? e owner id hid=0 miss=0
   for e in "${CREATED[@]:-}"; do
     [ -n "$e" ] || continue
     owner="${e%%:*}"
     id="${e#*:}"
-    QUIET=1 call "$owner" GET "/v1/ads/$id" 2>/dev/null || continue
+    if ! soft_call "$owner" GET "/v1/ads/$id"; then miss=$((miss + 1)); continue; fi
     if [ "$(j .status)" = AD_STATUS_PUBLISHED ]; then
-      QUIET=1 call "$owner" POST "/v1/ads/$id:hide" 2>/dev/null && hid=$((hid + 1))
+      if soft_call "$owner" POST "/v1/ads/$id:hide" '{}'; then hid=$((hid + 1)); else miss=$((miss + 1)); fi
     fi
   done
   [ "$hid" -gt 0 ] && note "cleanup: hid $hid of the demo's ads that were still PUBLISHED"
+  [ "$miss" -gt 0 ] && note "cleanup: $miss request(s) failed; some demo ads may still be PUBLISHED"
   return $rc
 }
 # fail() calls exit inside call(), whose subshell-free design lets this trap run.

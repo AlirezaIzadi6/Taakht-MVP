@@ -80,15 +80,31 @@ func (a *Actor) PublishAd(spec *adv1.AdSpec) *adv1.Ad {
 	ad, err = a.C.Ad.PublishAd(ctx, &adv1.AdIdRequest{AdId: ad.GetId()})
 	NoErr(a.T, err, a.ID+" PublishAd")
 	adID := ad.GetId()
-	a.T.Cleanup(func() {
-		ctx, cancel := a.Ctx()
-		defer cancel()
-		if cur, err := a.C.Ad.GetAd(ctx, &adv1.GetAdRequest{AdId: adID}); err == nil &&
-			cur.GetStatus() == adv1.AdStatus_AD_STATUS_PUBLISHED {
-			_, _ = a.C.Ad.HideAd(ctx, &adv1.AdIdRequest{AdId: adID})
-		}
-	})
+	a.T.Cleanup(func() { a.hideIfStillPublished(adID) })
 	return ad
+}
+
+// hideIfStillPublished is best-effort test cleanup: ads that were LOCKED at test end may settle back
+// to PUBLISHED (swap cancelled), so it polls briefly for a final state. It never fails the test.
+func (a *Actor) hideIfStillPublished(adID string) {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		ctx, cancel := a.Ctx()
+		cur, err := a.C.Ad.GetAd(ctx, &adv1.GetAdRequest{AdId: adID})
+		if err == nil && cur.GetStatus() == adv1.AdStatus_AD_STATUS_PUBLISHED {
+			_, _ = a.C.Ad.HideAd(ctx, &adv1.AdIdRequest{AdId: adID})
+			cancel()
+			return
+		}
+		cancel()
+		if err == nil && cur.GetStatus() != adv1.AdStatus_AD_STATUS_LOCKED {
+			return
+		}
+		if time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // GetAd reads an ad (any user may).
